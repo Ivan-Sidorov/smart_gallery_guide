@@ -6,12 +6,12 @@
 В современных музеях услуги гида и аудиогида обладают значительными ограничениями с точки зрения персонализации и гибкости предоставления информации. Традиционные групповые экскурсии, проводимые гидами, не позволяют посетителям адаптировать маршрут под свои интересы. Аудиогиды обеспечивают индивидуальный формат, однако объем выдаваемой информации строго ограничен заранее записанными материалами и не предусматривает интерактивного взаимодействия и возможности получения справок на уникальные, частные вопросы. Современный посетитель заинтересован в свободном изучении экспозиций, выборе темпа осмотра и возможности получения расширенной информации об объектах в реальном времени.
 
 ## Технологический стек
-- **Vector DB**: ChromaDB (локальный режим)
-- **ML Models**:
-  - Vision Encoder: CLIP
-  - ASR: whisper-base
-  - VLM: Qwen3-VL-8B-Instruct
-  - TTS: XTTS-v2
+* **Vector DB**: ChromaDB (локальный режим)
+* **ML Models**:
+  * Vision Encoder: CLIP
+  * ASR: whisper-base
+  * VLM: Qwen3-VL-8B-Instruct
+  * TTS: XTTS-v2
 
 ## Установка
 TBD
@@ -30,15 +30,59 @@ smart_gallery_guide/
 ```
 
 ## Использование
-TBD
+
+### Запуск vLLM сервера
+
+Перед использованием VLM необходимо запустить vLLM сервер:
+
+```bash
+# Запуск сервера
+./scripts/start_vllm_server.sh
+
+# Или с кастомными параметрами
+./scripts/start_vllm_server.sh \
+    --model Qwen/Qwen3-VL-8B-Instruct \
+    --port 8000 \
+    --gpu-memory-utilization 0.9
+```
+
+Скрипт поддерживает следующие параметры:
+* `--model`: название модели (по умолчанию из .env или конфига)
+* `--host`: хост для биндинга (по умолчанию 0.0.0.0)
+* `--port`: порт (по умолчанию 8000)
+* `--tensor-parallel-size`: количество GPU для параллелизма
+* `--gpu-memory-utilization`: использование GPU памяти (0.0-1.0)
+* `--max-model-len`: максимальная длина модели
+* `--trust-remote-code`: доверять удаленному коду
+* `--dtype`: тип данных (auto/float16/bfloat16)
+
+Скрипт автоматически загружает переменные из `.env` файла, если он существует.
+
+### Пример использования VLM
+
+```python
+from PIL import Image
+from models.vlm import VLM
+
+async with VLM() as vlm:
+    image = Image.open("path/to/image.jpg")
+    answer = await vlm.answer_question(
+        image=image,
+        question="Что изображено на этой картине?",
+        context="Это картина из коллекции музея."
+    )
+    print(answer)
+```
+
+Полный пример можно посмотреть в `scripts/example_vlm_usage.py`.
 
 ## Конфигурация
 Основные настройки находятся в `.env` файле:
-- `TELEGRAM_BOT_TOKEN` - токен тг бота
-- `CHROMA_PERSIST_DIR` - директория для хранения chroma
-- `VLLM_API_BASE_URL` - URL vllm API сервера
-- `VLLM_VLM_MODEL` - название VLM модели
-- `VLLM_ASR_MODEL` - название ASR модели
-- `VLLM_TTS_MODEL` - название TTS модели
-- `VLLM_API_KEY` - vllm API ключ
-- Пороги для поиска и релевантности (`EXHIBIT_MATCH_THRESHOLD`, `FAQ_RELEVANCE_THRESHOLD`)
+* `TELEGRAM_BOT_TOKEN` - токен тг бота
+* `CHROMA_PERSIST_DIR` - директория для хранения chroma
+* `VLLM_API_BASE_URL` - URL vllm API сервера
+* `VLLM_VLM_MODEL` - название VLM модели
+* `VLLM_ASR_MODEL` - название ASR модели
+* `VLLM_TTS_MODEL` - название TTS модели
+* `VLLM_API_KEY` - vllm API ключ
+* Пороги для поиска и релевантности (`EXHIBIT_MATCH_THRESHOLD`, `FAQ_RELEVANCE_THRESHOLD`)

@@ -19,21 +19,23 @@ classifiers = [
 ]
 
 dependencies = [
-    "python-telegram-bot>=20.7",
-    "aiogram>=3.3.0",
+    "python-telegram-bot>=22.0",
+    "aiogram>=3.19.0",
 
-    "chromadb>=0.4.22",
+    "chromadb>=1.0.0",
 
-    "torch>=2.0.0",
-    "transformers>=4.35.0",
-    "sentence-transformers>=2.2.2",
+    "torch>=2.2.2",
+    "transformers>=4.51.0",
+    "sentence-transformers>=4.0.0",
+    "Pillow>=11.2.1",
+    "vllm>=0.8.0",
 
-    "openai>=1.0.0",
+    "openai>=1.70.0",
 
     "python-dotenv>=1.0.0",
-    "numpy>=1.24.0",
+    "numpy>=2.2.4",
     "aiofiles>=23.2.1",
-    "pydantic>=2.5.0",
+    "pydantic>=2.11.0",
 
     "pydub>=0.25.1",
     "ffmpeg-python>=0.2.0",
@@ -43,5 +45,5 @@ dependencies = [
 smart-guide-bot = "bot.bot:main"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build<0.10.0"]
+build-backend = "uv_build"

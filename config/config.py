@@ -20,6 +20,8 @@ CHROMA_COLLECTION_FAQ = os.getenv("CHROMA_COLLECTION_FAQ", "faq")
 # vLLM config
 VLLM_API_BASE_URL = os.getenv("VLLM_API_BASE_URL", "http://localhost:8000/v1")
 VLLM_VLM_MODEL = os.getenv("VLLM_VLM_MODEL", "Qwen/Qwen3-VL-8B-Instruct")
+VLLM_VLM_MAX_TOKENS = int(os.getenv("VLLM_VLM_MAX_TOKENS", "500"))
+VLLM_VLM_TEMPERATURE = float(os.getenv("VLLM_VLM_TEMPERATURE", "0.7"))
 VLLM_ASR_MODEL = os.getenv("VLLM_ASR_MODEL", "openai/whisper-large-v3")
 VLLM_TTS_MODEL = os.getenv("VLLM_TTS_MODEL", "coqui/XTTS-v2")
 VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")  # Optional API key if needed
