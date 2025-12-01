@@ -54,5 +54,35 @@ class VisionEncoder:
                 pil_images.append(img)
 
         # Generate embeddings
-        embeddings = self.model.encode(pil_images, convert_to_numpy=True)
+        embeddings = self.model.encode(
+            pil_images, convert_to_numpy=True, show_progress_bar=False
+        )
+        return embeddings
+
+    def encode_text(self, text: str) -> np.ndarray:
+        """
+        Encode text into embedding using CLIP.
+
+        Args:
+            text (str): Text to encode
+
+        Returns:
+            np.ndarray: Embedding vector
+        """
+        embedding = self.model.encode(text, convert_to_numpy=True)
+        return embedding
+
+    def encode_texts_batch(self, texts: List[str]) -> np.ndarray:
+        """
+        Encode multiple texts into embeddings.
+
+        Args:
+            texts (List[str]): List of texts to encode
+
+        Returns:
+            np.ndarray: Array of embedding vectors
+        """
+        embeddings = self.model.encode(
+            texts, convert_to_numpy=True, show_progress_bar=False
+        )
         return embeddings

@@ -3,7 +3,11 @@ from typing import Any, Dict, List, Optional
 import chromadb
 from chromadb.config import Settings
 
-from config.config import CHROMA_COLLECTION_EXHIBITS, CHROMA_COLLECTION_FAQ, CHROMA_PERSIST_DIR
+from config.config import (
+    CHROMA_COLLECTION_EXHIBITS,
+    CHROMA_COLLECTION_FAQ,
+    CHROMA_PERSIST_DIR,
+)
 from database.schemas import ExhibitMetadata, ExhibitSearchResult, FAQSearchResult
 
 
@@ -14,7 +18,9 @@ class VectorDatabase:
         persist_dir = persist_directory or CHROMA_PERSIST_DIR
         self.client = chromadb.PersistentClient(
             path=str(persist_dir),
-            settings=Settings(chroma_db_impl="duckdb+parquet", anonymized_telemetry=False),
+            settings=Settings(
+                chroma_db_impl="duckdb+parquet", anonymized_telemetry=False
+            ),
         )
 
         self.exhibits_collection = self.client.get_or_create_collection(
@@ -125,13 +131,15 @@ class VectorDatabase:
         if metadata:
             payload["metadata"] = metadata
 
-        self.faq_collection.add(embeddings=[question_embedding], ids=[faq_id], metadatas=[payload])
+        self.faq_collection.add(
+            embeddings=[question_embedding], ids=[faq_id], metadatas=[payload]
+        )
         return True
 
     def search_faq(
         self,
         question_embedding: List[float],
-        exhibit_id: Optional[str] = None,
+        exhibit_id: str,
         limit: int = 3,
         score_threshold: float = 0.6,
     ) -> List[FAQSearchResult]:
@@ -140,19 +148,18 @@ class VectorDatabase:
 
         Args:
             question_embedding (List[float]): Question embedding vector
-            exhibit_id (Optional[str]): Optional filter by exhibit ID
+            exhibit_id (str): Exhibit id
             limit (int): Maximum number of results
             score_threshold (float): Minimum similarity score
 
         Returns:
             List[FAQSearchResult]: List of FAQ search results
         """
-        where = None
-        if exhibit_id:
-            where = {"exhibit_id": exhibit_id}
 
         results = self.faq_collection.query(
-            query_embeddings=[question_embedding], n_results=limit, where=where
+            query_embeddings=[question_embedding],
+            n_results=limit,
+            where={"exhibit_id": exhibit_id},
         )
 
         search_results = []
