@@ -29,9 +29,9 @@ class VLM:
         Initialize VLM client.
 
         Args:
-            api_base_url: vLLM API base URL. Defaults to config.
-            model_name: Model name. Defaults to config.
-            api_key: API key. Defaults to config.
+            api_base_url (Optional[str]): vLLM API base URL. Defaults to config.
+            model_name (Optional[str]): Model name. Defaults to config.
+            api_key (Optional[str]): API key. Defaults to config.
         """
         self.api_base_url = api_base_url or VLLM_API_BASE_URL
         self.model_name = model_name or VLLM_VLM_MODEL
@@ -47,10 +47,10 @@ class VLM:
         Convert PIL Image to base64 string.
 
         Args:
-            image: PIL Image
+            image (Image.Image): PIL Image
 
         Returns:
-            Base64 encoded image string
+            str: Base64 encoded image string
         """
         buffered = BytesIO()
         image.save(buffered, format="PNG")

@@ -26,9 +26,9 @@ class GuideAgent:
         Initialize GuideAgent.
 
         Args:
-            vector_db: Optional[VectorDatabase]: VectorDatabase instance. Defaults to None (creates a new one).
-            vision_encoder: Optional[VisionEncoder]: VisionEncoder instance. Defaults to None (creates a new one).
-            text_encoder: Optional[TextEncoder]: TextEncoder instance. Defaults to None (creates a new one).
+            vector_db (Optional[VectorDatabase]): VectorDatabase instance. Defaults to None (creates a new one).
+            vision_encoder (Optional[VisionEncoder]): VisionEncoder instance. Defaults to None (creates a new one).
+            text_encoder (Optional[TextEncoder]): TextEncoder instance. Defaults to None (creates a new one).
         """
         self.vector_db = vector_db or VectorDatabase()
         self.vision_encoder = vision_encoder or VisionEncoder()
@@ -46,9 +46,9 @@ class GuideAgent:
         Recognize exhibit from image using vector search.
 
         Args:
-            image: Image.Image: PIL Image to recognize
-            limit: int: Maximum number of results. Defaults to 5.
-            score_threshold: Optional[float]: Minimum similarity score. Defaults to None (uses config default).
+            image (Image.Image): PIL Image to recognize
+            limit (int): Maximum number of results. Defaults to 5.
+            score_threshold (Optional[float]): Minimum similarity score. Defaults to None (uses config default).
 
         Returns:
             List[ExhibitSearchResult]: List of ExhibitSearchResult sorted by similarity score
@@ -87,9 +87,9 @@ class GuideAgent:
         Requires exhibit_id to be provided (exhibit must be recognized first).
 
         Args:
-            image: Image.Image: PIL Image to analyze
-            question: str: Question about the image
-            exhibit_id: str: Exhibit ID (must be recognized first via recognize_exhibit)
+            image (Image.Image): PIL Image to analyze
+            question (str): Question about the image
+            exhibit_id (str): Exhibit ID (must be recognized first via recognize_exhibit)
 
         Returns:
             str: Answer string from VLM, or error message if exhibit not found
@@ -127,10 +127,10 @@ class GuideAgent:
         Search for FAQ items by question for a specific exhibit.
 
         Args:
-            question: str: Question text
-            exhibit_id: str: Exhibit ID (required - FAQ search is always tied to an exhibit)
-            limit: int: Maximum number of results. Defaults to 3.
-            score_threshold: Optional[float]: Minimum similarity score. Defaults to None (uses config default).
+            question (str): Question text
+            exhibit_id (str): Exhibit ID (required - FAQ search is always tied to an exhibit)
+            limit (int): Maximum number of results. Defaults to 3.
+            score_threshold (Optional[float]): Minimum similarity score. Defaults to None (uses config default).
 
         Returns:
             List[FAQSearchResult]: List of FAQSearchResult sorted by similarity score
@@ -165,7 +165,7 @@ class GuideAgent:
         Get information about a specific exhibit.
 
         Args:
-            exhibit_id: str: Exhibit ID
+            exhibit_id (str): Exhibit ID
 
         Returns:
             Optional[ExhibitMetadata]: ExhibitMetadata or None if not found
@@ -192,9 +192,9 @@ class GuideAgent:
         Search for exhibits by text query.
 
         Args:
-            query: str: Text query
-            limit: int: Maximum number of results
-            score_threshold: Optional[float]: Minimum similarity score. Defaults to None (uses config default).
+            query (str): Text query
+            limit (int): Maximum number of results
+            score_threshold (Optional[float]): Minimum similarity score. Defaults to None (uses config default).
 
         Returns:
             List[ExhibitSearchResult]: List of ExhibitSearchResult sorted by similarity score
@@ -226,7 +226,7 @@ class GuideAgent:
         Build context string from exhibit metadata for VLM.
 
         Args:
-            metadata: ExhibitMetadata: ExhibitMetadata
+            metadata (ExhibitMetadata): ExhibitMetadata
 
         Returns:
             str: Context string for VLM
