@@ -9,9 +9,7 @@
 * **Vector DB**: ChromaDB (локальный режим)
 * **ML Models**:
   * Vision Encoder: CLIP
-  * ASR: whisper-base
   * VLM: Qwen3-VL-8B-Instruct
-  * TTS: XTTS-v2
 
 ## Установка
 TBD
@@ -82,7 +80,7 @@ async with VLM() as vlm:
 * `CHROMA_PERSIST_DIR` - директория для хранения chroma
 * `VLLM_API_BASE_URL` - URL vllm API сервера
 * `VLLM_VLM_MODEL` - название VLM модели
-* `VLLM_ASR_MODEL` - название ASR модели
-* `VLLM_TTS_MODEL` - название TTS модели
+* `VLLM_VLM_MAX_TOKENS` - максимальное количество токенов в ответе
+* `VLLM_VLM_TEMPERATURE` - температура для генерации
 * `VLLM_API_KEY` - vllm API ключ
 * Пороги для поиска и релевантности (`EXHIBIT_MATCH_THRESHOLD`, `FAQ_RELEVANCE_THRESHOLD`)

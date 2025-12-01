@@ -22,8 +22,6 @@ VLLM_API_BASE_URL = os.getenv("VLLM_API_BASE_URL", "http://localhost:8000/v1")
 VLLM_VLM_MODEL = os.getenv("VLLM_VLM_MODEL", "Qwen/Qwen3-VL-8B-Instruct")
 VLLM_VLM_MAX_TOKENS = int(os.getenv("VLLM_VLM_MAX_TOKENS", "500"))
 VLLM_VLM_TEMPERATURE = float(os.getenv("VLLM_VLM_TEMPERATURE", "0.7"))
-VLLM_ASR_MODEL = os.getenv("VLLM_ASR_MODEL", "openai/whisper-large-v3")
-VLLM_TTS_MODEL = os.getenv("VLLM_TTS_MODEL", "coqui/XTTS-v2")
 VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")  # Optional API key if needed
 
 # Encoder models
@@ -34,17 +32,11 @@ TEXT_ENCODER_MODEL = os.getenv("TEXT_ENCODER_MODEL", "deepvk/USER-bge-m3")
 EXHIBIT_MATCH_THRESHOLD = float(os.getenv("EXHIBIT_MATCH_THRESHOLD", "0.7"))
 FAQ_RELEVANCE_THRESHOLD = float(os.getenv("FAQ_RELEVANCE_THRESHOLD", "0.6"))
 
-# Audio config
-AUDIO_SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
-AUDIO_FORMAT = os.getenv("AUDIO_FORMAT", "wav")
-
 # Data dirs
 DATA_DIR = PROJECT_ROOT / "data"
 EXHIBITS_DIR = DATA_DIR / "exhibits"
 METADATA_DIR = DATA_DIR / "metadata"
-TEMP_AUDIO_DIR = PROJECT_ROOT / "temp_audio"
 
 DATA_DIR.mkdir(exist_ok=True)
 EXHIBITS_DIR.mkdir(exist_ok=True)
 METADATA_DIR.mkdir(exist_ok=True)
-TEMP_AUDIO_DIR.mkdir(exist_ok=True)
