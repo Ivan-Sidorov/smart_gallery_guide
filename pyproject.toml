@@ -42,5 +42,8 @@ dependencies = [
 smart-guide-bot = "bot.bot:main"
 
 [build-system]
-requires = ["uv_build<0.10.0"]
-build-backend = "uv_build"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["agent", "bot", "config", "database", "models"]

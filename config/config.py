@@ -25,7 +25,9 @@ VLLM_VLM_TEMPERATURE = float(os.getenv("VLLM_VLM_TEMPERATURE", "0.7"))
 VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")  # Optional API key if needed
 
 # Encoder models
-VISION_ENCODER_MODEL = os.getenv("VISION_ENCODER_MODEL", "openai/clip-vit-base-patch32")
+VISION_ENCODER_MODEL = os.getenv(
+    "VISION_ENCODER_MODEL", "sentence-transformers/clip-ViT-B-32"
+)
 TEXT_ENCODER_MODEL = os.getenv("TEXT_ENCODER_MODEL", "deepvk/USER-bge-m3")
 
 # Thresholds
