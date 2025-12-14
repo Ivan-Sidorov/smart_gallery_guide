@@ -12,6 +12,10 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # Telegram bot config
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
+# Vector storage backend
+VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "faiss").lower()
+FAISS_STORAGE_DIR = os.getenv("FAISS_STORAGE_DIR", str(PROJECT_ROOT / "faiss_store"))
+
 # ChromaDB config
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", str(PROJECT_ROOT / "chroma_db"))
 CHROMA_COLLECTION_EXHIBITS = os.getenv("CHROMA_COLLECTION_EXHIBITS", "exhibits")
