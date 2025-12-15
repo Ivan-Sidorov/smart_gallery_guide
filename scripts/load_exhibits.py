@@ -10,6 +10,7 @@ sys.path.insert(0, str(project_root))
 from config.config import EXHIBITS_DIR, METADATA_DIR
 from database.schemas import ExhibitMetadata
 from database.vector_db import VectorDatabase
+from models.text_encoder import TextEncoder
 from models.vision_encoder import VisionEncoder
 
 
@@ -25,6 +26,7 @@ def load_exhibits_from_directory(
     """
     db = VectorDatabase()
     vision_encoder = VisionEncoder()
+    text_encoder = TextEncoder()
 
     image_files = (
         list(exhibits_dir.glob("*.jpg"))
@@ -65,8 +67,32 @@ def load_exhibits_from_directory(
             print(f"Error while encoding image for {exhibit_id}: {e}")
             continue
 
+        title_text = f"{metadata.artist or ''} {metadata.title}".strip()
+        desc_text = " ".join(
+            [
+                metadata.description,
+                " ".join(metadata.interesting_facts or []),
+            ]
+        ).strip()
+
         try:
-            db.add_exhibit(exhibit_id, embedding.tolist(), metadata)
+            title_emb = text_encoder.encode_text(title_text).tolist()
+            desc_emb = (
+                text_encoder.encode_text(desc_text).tolist() if desc_text else None
+            )
+        except Exception as e:
+            print(f"Error while encoding text for {exhibit_id}: {e}")
+            title_emb = None
+            desc_emb = None
+
+        try:
+            db.add_exhibit(
+                exhibit_id,
+                embedding.tolist(),
+                metadata,
+                title_embedding=title_emb,
+                desc_embedding=desc_emb,
+            )
             print(f"Added exhibit: {metadata.title} (ID: {exhibit_id})")
         except Exception as e:
             print(f"Error while adding exhibit {exhibit_id} to database: {e}")

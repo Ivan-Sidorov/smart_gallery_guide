@@ -29,7 +29,7 @@ async def download_photo(
             logger.warning("No photo in message")
             return None
 
-        photo = update.message.photo[0]
+        photo = update.message.photo[-1]
 
         file = await context.bot.get_file(photo.file_id)
         file_data = await file.download_as_bytearray()

@@ -1,585 +1,451 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-import chromadb
 import faiss
 import numpy as np
 
-from config.config import (
-    CHROMA_COLLECTION_EXHIBITS,
-    CHROMA_COLLECTION_FAQ,
-    CHROMA_PERSIST_DIR,
-    FAISS_STORAGE_DIR,
-    VECTOR_BACKEND,
-)
+from config.config import FAISS_STORAGE_DIR
 from database.schemas import ExhibitMetadata, ExhibitSearchResult, FAQSearchResult
 
 logger = logging.getLogger(__name__)
 
 
-class FaissLocalIndex:
-    """Lightweight FAISS-backed storage with on-disk persistence."""
-
-    def __init__(self, storage_dir: Path, name: str):
+class VectorDatabase:
+    def __init__(self, storage_dir: str = FAISS_STORAGE_DIR):
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-        self.index_path = self.storage_dir / f"{name}.index"
-        self.meta_path = self.storage_dir / f"{name}_meta.json"
-        self.embeddings_path = self.storage_dir / f"{name}_embeddings.npy"
+        self.exhibit_index_path = self.storage_dir / "exhibits.index"
+        self.exhibit_meta_path = self.storage_dir / "exhibits.json"
+        self.faq_index_path = self.storage_dir / "faq.index"
+        self.faq_meta_path = self.storage_dir / "faq.json"
+        self.title_index_path = self.storage_dir / "title.index"
+        self.title_meta_path = self.storage_dir / "title.json"
+        self.desc_index_path = self.storage_dir / "desc.index"
+        self.desc_meta_path = self.storage_dir / "desc.json"
 
-        self.index: Optional[faiss.IndexFlatIP] = None
-        self.dimension: Optional[int] = None
-        self.ids: List[str] = []
-        self.metadatas: List[Dict[str, Any]] = []
-        self.embeddings: np.ndarray = np.empty((0, 0), dtype=np.float32)
+        self.exhibit_index: Optional[faiss.IndexFlatIP] = None
+        self.exhibit_dim: Optional[int] = None
+        self.exhibit_ids: List[str] = []
+        self.exhibit_metadata: Dict[str, Dict] = {}
 
-        self._load()
+        self.faq_index: Optional[faiss.IndexFlatIP] = None
+        self.faq_dim: Optional[int] = None
+        self.faq_items: List[Dict] = []
 
-    def _load(self) -> None:
-        """Load index, embeddings and metadata from disk if present."""
-        if (
-            self.index_path.exists()
-            and self.meta_path.exists()
-            and self.embeddings_path.exists()
-        ):
-            try:
-                self.index = faiss.read_index(str(self.index_path))
-                with open(self.meta_path, "r", encoding="utf-8") as f:
-                    payload = json.load(f)
+        self.title_index: Optional[faiss.IndexFlatIP] = None
+        self.title_dim: Optional[int] = None
+        self.title_ids: List[str] = []
 
-                self.ids = payload.get("ids", [])
-                self.metadatas = payload.get("metadatas", [])
-                self.dimension = payload.get("dimension")
-                self.embeddings = np.load(self.embeddings_path)
+        self.desc_index: Optional[faiss.IndexFlatIP] = None
+        self.desc_dim: Optional[int] = None
+        self.desc_ids: List[str] = []
 
-                if self.dimension is None and self.embeddings.size > 0:
-                    self.dimension = int(self.embeddings.shape[1])
-                logger.info(
-                    "Loaded FAISS index %s with %d items",
-                    self.index_path,
-                    len(self.ids),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to load FAISS index %s: %s. Starting fresh.",
-                    self.index_path,
-                    exc,
-                )
-                self._reset()
-        else:
-            self._reset()
+        self._load_exhibits()
+        self._load_faq()
+        self._load_title_index()
+        self._load_desc_index()
 
-    def _reset(self) -> None:
-        """Reset in-memory state for empty index."""
-        self.index = None
-        self.dimension = None
-        self.ids = []
-        self.metadatas = []
-        self.embeddings = np.empty((0, 0), dtype=np.float32)
+    def add_exhibit(
+        self,
+        exhibit_id: str,
+        embedding: List[float],
+        metadata: ExhibitMetadata,
+        title_embedding: Optional[List[float]] = None,
+        desc_embedding: Optional[List[float]] = None,
+    ) -> None:
+        vector = self._normalize(embedding)
+        dim = vector.shape[1]
 
-    def _ensure_index(self, dimension: int) -> None:
-        """Create an empty IndexFlatIP if it does not exist."""
-        if self.index is None:
-            self.dimension = dimension
-            self.index = faiss.IndexFlatIP(dimension)
-            self.embeddings = np.empty((0, dimension), dtype=np.float32)
+        if self.exhibit_index is None:
+            self.exhibit_index = faiss.IndexFlatIP(dim)
+            self.exhibit_dim = dim
+        elif dim != self.exhibit_dim:
+            raise ValueError("Dimension of embedding does not match the index.")
 
-    def _persist(self) -> None:
-        """Persist index, embeddings and metadata to disk."""
-        if self.index is None or self.dimension is None:
+        if exhibit_id in self.exhibit_ids:
+            logger.warning(
+                "Exhibit %s already exists in the index, skipping.", exhibit_id
+            )
             return
 
-        faiss.write_index(self.index, str(self.index_path))
-        with open(self.meta_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "ids": self.ids,
-                    "metadatas": self.metadatas,
-                    "dimension": self.dimension,
-                },
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
-        np.save(self.embeddings_path, self.embeddings)
+        self.exhibit_index.add(vector)
+        self.exhibit_ids.append(exhibit_id)
+        self.exhibit_metadata[exhibit_id] = metadata.model_dump()
 
-    def add(
-        self, item_id: str, embedding: List[float], metadata: Dict[str, Any]
-    ) -> None:
-        """Add new item to the index (overwrites existing id)."""
-        embedding_arr = np.array(embedding, dtype=np.float32).reshape(1, -1)
-        if embedding_arr.ndim != 2 or embedding_arr.shape[0] != 1:
-            raise ValueError("Embedding must be a 1D vector")
+        self._save_exhibits()
 
-        if item_id in self.ids:
-            self.delete(item_id)
+        if title_embedding is not None:
+            self._add_title_embedding(exhibit_id, title_embedding)
+        if desc_embedding is not None:
+            self._add_desc_embedding(exhibit_id, desc_embedding)
 
-        self._ensure_index(embedding_arr.shape[1])
-        if embedding_arr.shape[1] != self.dimension:
-            raise ValueError(
-                f"Embedding dimension {embedding_arr.shape[1]} "
-                f"does not match index dimension {self.dimension}"
-            )
-
-        self.ids.append(item_id)
-        self.metadatas.append(metadata)
-        if self.embeddings.size == 0:
-            self.embeddings = embedding_arr
-        else:
-            self.embeddings = np.vstack([self.embeddings, embedding_arr])
-
-        self.index.add(embedding_arr)
-        self._persist()
-
-    def search(
+    def add_faq(
         self,
-        query_embedding: List[float],
-        limit: int,
-        where: Optional[Dict[str, Any]] = None,
-    ) -> List[Tuple[str, Dict[str, Any], float]]:
-        """Search for nearest neighbors with optional metadata filtering."""
-        if self.index is None or self.index.ntotal == 0 or self.dimension is None:
+        question: str,
+        answer: str,
+        exhibit_id: str,
+        embedding: List[float],
+        category: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> None:
+        vector = self._normalize(embedding)
+        dim = vector.shape[1]
+
+        if self.faq_index is None:
+            self.faq_index = faiss.IndexFlatIP(dim)
+            self.faq_dim = dim
+        elif dim != self.faq_dim:
+            raise ValueError("Dimension of embedding does not match the FAQ index.")
+
+        self.faq_index.add(vector)
+        self.faq_items.append(
+            {
+                "question": question,
+                "answer": answer,
+                "exhibit_id": exhibit_id,
+                "category": category,
+                "metadata": metadata or {},
+            }
+        )
+
+        self._save_faq()
+
+    def search_exhibit(
+        self,
+        image_embedding: List[float],
+        limit: int = 5,
+        score_threshold: float = 0.0,
+        display_threshold: Optional[float] = None,
+    ) -> List[ExhibitSearchResult]:
+        if self.exhibit_index is None or self.exhibit_index.ntotal == 0:
             return []
 
-        query = np.array(query_embedding, dtype=np.float32).reshape(1, -1)
-        if query.shape[1] != self.dimension:
-            raise ValueError(
-                f"Query dimension {query.shape[1]} "
-                f"does not match index dimension {self.dimension}"
-            )
+        query = self._normalize(image_embedding)
+        if query.shape[1] != self.exhibit_dim:
+            raise ValueError("Dimension of query does not match the index.")
 
-        k = self.index.ntotal if where else min(limit, self.index.ntotal)
-        scores, indices = self.index.search(query, k)
+        k = min(self.exhibit_index.ntotal, max(limit * 3, limit))
+        scores, idxs = self.exhibit_index.search(query, k)
 
-        results: List[Tuple[str, Dict[str, Any], float]] = []
-        for score, idx in zip(scores[0], indices[0]):
+        cutoff = display_threshold if display_threshold is not None else score_threshold
+
+        results: List[ExhibitSearchResult] = []
+        for score, idx in zip(scores[0], idxs[0]):
             if idx == -1:
                 continue
-            metadata = self.metadatas[idx]
-            if where and any(
-                metadata.get(key) != value for key, value in where.items()
-            ):
+            if score < cutoff:
                 continue
 
-            results.append((self.ids[idx], metadata, float(score)))
+            exhibit_id = self.exhibit_ids[idx]
+            metadata_dict = self.exhibit_metadata.get(exhibit_id)
+            if not metadata_dict:
+                continue
+
+            metadata = ExhibitMetadata(**metadata_dict)
+            results.append(
+                ExhibitSearchResult(
+                    exhibit_id=exhibit_id,
+                    title=metadata.title,
+                    similarity_score=float(score),
+                    metadata=metadata,
+                )
+            )
             if len(results) >= limit:
                 break
 
         return results
 
-    def get(self, item_id: str) -> Optional[Dict[str, Any]]:
-        """Get metadata for item."""
-        if item_id in self.ids:
-            idx = self.ids.index(item_id)
-            return self.metadatas[idx]
-        return None
-
-    def delete(self, item_id: str) -> bool:
-        """Delete item by id, rebuilding the index."""
-        if item_id not in self.ids or self.dimension is None:
-            return False
-
-        idx = self.ids.index(item_id)
-        self.ids.pop(idx)
-        self.metadatas.pop(idx)
-
-        if self.embeddings.size > 0:
-            self.embeddings = np.delete(self.embeddings, idx, axis=0)
-
-        self.index = faiss.IndexFlatIP(self.dimension)
-        if self.embeddings.size > 0:
-            self.index.add(self.embeddings.astype(np.float32))
-
-        self._persist()
-        return True
-
-
-class VectorDatabase:
-    """Vector DB for exhibits and FAQ."""
-
-    def __init__(
+    def search_text(
         self,
-        persist_directory: Optional[str] = None,
-        backend: Optional[str] = None,
-        faiss_storage_dir: Optional[str] = None,
-    ):
-        self.backend = (backend or VECTOR_BACKEND or "chroma").lower()
-        self._use_faiss = self.backend == "faiss"
-
-        if self._use_faiss:
-            storage_dir = Path(faiss_storage_dir or FAISS_STORAGE_DIR)
-            self.exhibits_index = FaissLocalIndex(storage_dir, "exhibits")
-            self.faq_index = FaissLocalIndex(storage_dir, "faq")
-            logger.info(
-                "VectorDatabase initialized with FAISS backend at %s", storage_dir
-            )
-            return
-
-        persist_dir = persist_directory or CHROMA_PERSIST_DIR
-        self.client = chromadb.PersistentClient(path=str(persist_dir))
-
-        self.exhibits_collection = self.client.get_or_create_collection(
-            name=CHROMA_COLLECTION_EXHIBITS,
-            metadata={"description": "Exhibits with image embeddings"},
-            configuration={
-                "hnsw": {
-                    "space": "cosine",
-                    "ef_construction": 400,
-                    "max_neighbors": 32,
-                    "ef_search": 200,
-                }
-            },
-        )
-
-        self.faq_collection = self.client.get_or_create_collection(
-            name=CHROMA_COLLECTION_FAQ,
-            metadata={"description": "FAQ items with question embeddings"},
-            configuration={
-                "hnsw": {
-                    "space": "cosine",
-                    "ef_construction": 400,
-                    "max_neighbors": 32,
-                    "ef_search": 200,
-                }
-            },
-        )
-
-    @staticmethod
-    def _restore_metadata_types(metadata_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Restore metadata types from strings to original types.
-
-        Args:
-            metadata_dict (Dict[str, Any]): Metadata dict from ChromaDB
-
-        Returns:
-            Dict[str, Any]: Metadata dict with restored types
-        """
-        processed_dict = metadata_dict.copy()
-
-        if "interesting_facts" in processed_dict:
-            interesting_facts_str = processed_dict["interesting_facts"]
-            if isinstance(interesting_facts_str, list):
-                processed_dict["interesting_facts"] = interesting_facts_str
-            elif isinstance(interesting_facts_str, str) and interesting_facts_str:
-                processed_dict["interesting_facts"] = [
-                    fact.strip() for fact in interesting_facts_str.split(",")
-                ]
-            else:
-                processed_dict["interesting_facts"] = []
-
-        if "additional_info" in processed_dict:
-            additional_info_str = processed_dict["additional_info"]
-            if isinstance(additional_info_str, dict):
-                processed_dict["additional_info"] = additional_info_str
-            elif isinstance(additional_info_str, str) and additional_info_str:
-                try:
-                    processed_dict["additional_info"] = json.loads(additional_info_str)
-                except (json.JSONDecodeError, TypeError):
-                    processed_dict["additional_info"] = {}
-            else:
-                processed_dict["additional_info"] = {}
-
-        return processed_dict
-
-    @staticmethod
-    def _normalize_embedding(embedding: List[float]) -> List[float]:
-        """
-        Normalize embedding vector to unit length.
-
-        Args:
-            embedding (List[float]): Embedding vector
-
-        Returns:
-            List[float]: Normalized embedding vector
-        """
-        arr = np.array(embedding, dtype=np.float32)
-        norm = np.linalg.norm(arr)
-        if norm > 0:
-            arr = arr / norm
-        else:
-            logger.warning("Zero norm embedding detected!")
-        return arr.tolist()
-
-    def add_exhibit(
-        self, exhibit_id: str, image_embedding: List[float], metadata: ExhibitMetadata
-    ) -> bool:
-        """
-        Add an exhibit to the DB.
-
-        Args:
-            exhibit_id (str): Unique exhibit ID
-            image_embedding (List[float]): Image embedding
-            metadata (ExhibitMetadata): Exhibit metadata
-
-        Returns:
-            bool: True if successful
-        """
-        metadata_dict = metadata.model_dump()
-
-        normalized_embedding = self._normalize_embedding(image_embedding)
-
-        if self._use_faiss:
-            self.exhibits_index.add(exhibit_id, normalized_embedding, metadata_dict)
-            return True
-
-        # Convert types to strings for ChromaDB compatibility
-        processed_metadata = {}
-        for key, value in metadata_dict.items():
-            if isinstance(value, list):
-                processed_metadata[key] = ", ".join(str(item) for item in value)
-            elif isinstance(value, dict):
-                processed_metadata[key] = json.dumps(value, ensure_ascii=False)
-            elif value is None:
-                processed_metadata[key] = None
-            else:
-                processed_metadata[key] = value
-
-        self.exhibits_collection.add(
-            embeddings=[normalized_embedding],
-            ids=[exhibit_id],
-            metadatas=[processed_metadata],
-        )
-        return True
-
-    def search_exhibit(
-        self, image_embedding: List[float], limit: int = 5, score_threshold: float = 0.7
+        query_embedding: List[float],
+        variant: str,
+        limit: int = 5,
+        score_threshold: float = 0.0,
+        display_threshold: Optional[float] = None,
     ) -> List[ExhibitSearchResult]:
-        """
-        Search for similar exhibits.
+        if variant == "title":
+            index = self.title_index
+            ids = self.title_ids
+            dim = self.title_dim
+        elif variant == "desc":
+            index = self.desc_index
+            ids = self.desc_ids
+            dim = self.desc_dim
+        else:
+            raise ValueError("variant must be 'title' or 'desc'")
 
-        Args:
-            image_embedding (List[float]): Image embedding
-            limit (int): Maximum number of results
-            score_threshold (float): Minimum similarity score
+        if index is None or index.ntotal == 0:
+            return []
 
-        Returns:
-            List[ExhibitSearchResult]: List of search results
-        """
-        normalized_embedding = self._normalize_embedding(image_embedding)
+        query = self._normalize(query_embedding)
+        if query.shape[1] != dim:
+            raise ValueError("Dimension of query does not match the text index.")
 
-        search_results = []
-        if self._use_faiss:
-            results = self.exhibits_index.search(
-                query_embedding=normalized_embedding, limit=limit
+        k = min(index.ntotal, max(limit * 3, limit))
+        scores, idxs = index.search(query, k)
+
+        cutoff = display_threshold if display_threshold is not None else score_threshold
+
+        results: List[ExhibitSearchResult] = []
+        for score, idx in zip(scores[0], idxs[0]):
+            if idx == -1:
+                continue
+            if score < cutoff:
+                continue
+
+            exhibit_id = ids[idx]
+            metadata_dict = self.exhibit_metadata.get(exhibit_id)
+            if not metadata_dict:
+                continue
+
+            metadata = ExhibitMetadata(**metadata_dict)
+            results.append(
+                ExhibitSearchResult(
+                    exhibit_id=exhibit_id,
+                    title=metadata.title,
+                    similarity_score=float(score),
+                    metadata=metadata,
+                )
             )
-            for exhibit_id, metadata_dict, similarity in results:
-                if similarity < score_threshold:
-                    continue
-                try:
-                    processed_dict = self._restore_metadata_types(metadata_dict)
-                    metadata = ExhibitMetadata(**processed_dict)
-                    search_results.append(
-                        ExhibitSearchResult(
-                            exhibit_id=exhibit_id,
-                            title=metadata.title,
-                            similarity_score=similarity,
-                            metadata=metadata,
-                        )
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Error restoring metadata for {exhibit_id}: {e}",
-                        exc_info=True,
-                    )
-            logger.info(f"Found {len(search_results)} exhibits")
-            return search_results
+            if len(results) >= limit:
+                break
 
-        results = self.exhibits_collection.query(
-            query_embeddings=[normalized_embedding], n_results=limit
-        )
-
-        if results["ids"] and len(results["ids"][0]) > 0:
-            for i, exhibit_id in enumerate(results["ids"][0]):
-                metadata_dict = results["metadatas"][0][i]
-                distance = results["distances"][0][i]
-                similarity = 1.0 - distance
-
-                if similarity >= score_threshold:
-                    try:
-                        processed_dict = self._restore_metadata_types(metadata_dict)
-                        metadata = ExhibitMetadata(**processed_dict)
-                        search_results.append(
-                            ExhibitSearchResult(
-                                exhibit_id=exhibit_id,
-                                title=metadata.title,
-                                similarity_score=similarity,
-                                metadata=metadata,
-                            )
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Error restoring metadata for {exhibit_id}: {e}",
-                            exc_info=True,
-                        )
-                        continue
-
-        logger.info(f"Found {len(search_results)} exhibits")
-        return search_results
-
-    def add_faq(
-        self,
-        question: str,
-        question_embedding: List[float],
-        answer: str,
-        exhibit_id: str,
-        category: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """
-        Add a FAQ item to the database.
-
-        Args:
-            question (str): FAQ question
-            question_embedding (List[float]): Question embedding vector
-            answer (str): FAQ answer
-            exhibit_id (str): Associated exhibit ID
-            category (Optional[str]): Optional category
-            metadata (Optional[Dict[str, Any]]): Optional additional metadata
-
-        Returns:
-            bool: True if successful
-        """
-        faq_id = f"{exhibit_id}_{abs(hash(question))}"
-
-        payload = {
-            "question": question,
-            "answer": answer,
-            "exhibit_id": exhibit_id,
-        }
-
-        if category:
-            payload["category"] = category
-        if metadata:
-            payload["metadata"] = metadata
-
-        normalized_embedding = self._normalize_embedding(question_embedding)
-
-        if self._use_faiss:
-            self.faq_index.add(faq_id, normalized_embedding, payload)
-            return True
-
-        self.faq_collection.add(
-            embeddings=[normalized_embedding], ids=[faq_id], metadatas=[payload]
-        )
-        return True
+        return results
 
     def search_faq(
         self,
         question_embedding: List[float],
         exhibit_id: str,
         limit: int = 3,
-        score_threshold: float = 0.6,
+        score_threshold: float = 0.0,
+        display_threshold: Optional[float] = None,
     ) -> List[FAQSearchResult]:
-        """
-        Search for similar FAQ items.
+        if self.faq_index is None or self.faq_index.ntotal == 0:
+            return []
 
-        Args:
-            question_embedding (List[float]): Question embedding vector
-            exhibit_id (str): Exhibit id
-            limit (int): Maximum number of results
-            score_threshold (float): Minimum similarity score
+        query = self._normalize(question_embedding)
+        if query.shape[1] != self.faq_dim:
+            raise ValueError("Dimension of query does not match the FAQ index.")
 
-        Returns:
-            List[FAQSearchResult]: List of FAQ search results
-        """
+        k = self.faq_index.ntotal
+        scores, idxs = self.faq_index.search(query, k)
 
-        normalized_embedding = self._normalize_embedding(question_embedding)
+        cutoff = display_threshold if display_threshold is not None else score_threshold
 
-        search_results = []
-        if self._use_faiss:
-            results = self.faq_index.search(
-                query_embedding=normalized_embedding,
-                limit=limit,
-                where={"exhibit_id": exhibit_id},
-            )
-            for _, metadata, similarity in results:
-                if similarity < score_threshold:
-                    continue
-                search_results.append(
-                    FAQSearchResult(
-                        question=metadata.get("question", ""),
-                        answer=metadata.get("answer", ""),
-                        exhibit_id=metadata.get("exhibit_id", ""),
-                        similarity_score=similarity,
-                    )
+        results: List[FAQSearchResult] = []
+        for score, idx in zip(scores[0], idxs[0]):
+            if idx == -1:
+                continue
+
+            item = self.faq_items[idx]
+            if item["exhibit_id"] != exhibit_id:
+                continue
+            if score < cutoff:
+                continue
+
+            results.append(
+                FAQSearchResult(
+                    question=item["question"],
+                    answer=item["answer"],
+                    exhibit_id=item["exhibit_id"],
+                    similarity_score=float(score),
                 )
-            return search_results
+            )
+            if len(results) >= limit:
+                break
 
-        results = self.faq_collection.query(
-            query_embeddings=[normalized_embedding],
-            n_results=limit,
-            where={"exhibit_id": exhibit_id},
-        )
-
-        if results["ids"] and len(results["ids"][0]) > 0:
-            for i, faq_id in enumerate(results["ids"][0]):
-                metadata = results["metadatas"][0][i]
-                distance = results["distances"][0][i]
-                similarity = 1.0 - distance
-
-                if similarity >= score_threshold:
-                    search_results.append(
-                        FAQSearchResult(
-                            question=metadata.get("question", ""),
-                            answer=metadata.get("answer", ""),
-                            exhibit_id=metadata.get("exhibit_id", ""),
-                            similarity_score=similarity,
-                        )
-                    )
-
-        return search_results
+        return results
 
     def get_exhibit_metadata(self, exhibit_id: str) -> Optional[ExhibitMetadata]:
-        """
-        Get metadata for a specific exhibit.
+        metadata_dict = self.exhibit_metadata.get(exhibit_id)
+        if not metadata_dict:
+            return None
+        return ExhibitMetadata(**metadata_dict)
 
-        Args:
-            exhibit_id (str): Exhibit ID
+    def _normalize(self, vector: List[float]) -> np.ndarray:
+        arr = np.asarray(vector, dtype=np.float32).reshape(1, -1)
+        faiss.normalize_L2(arr)
+        return arr
 
-        Returns:
-            Optional[ExhibitMetadata]: Exhibit metadata or None if not found
-        """
-        if self._use_faiss:
-            metadata_dict = self.exhibits_index.get(exhibit_id)
-            if not metadata_dict:
-                return None
-            try:
-                processed_dict = self._restore_metadata_types(metadata_dict)
-                return ExhibitMetadata(**processed_dict)
-            except Exception:
-                return None
-
-        results = self.exhibits_collection.get(ids=[exhibit_id])
-
-        if results["ids"] and len(results["ids"]) > 0:
-            try:
-                metadata_dict = results["metadatas"][0]
-                processed_dict = self._restore_metadata_types(metadata_dict)
-                return ExhibitMetadata(**processed_dict)
-            except Exception:
-                return None
-
-        return None
-
-    def delete_exhibit(self, exhibit_id: str) -> bool:
-        """
-        Delete an exhibit from the database.
-
-        Args:
-            exhibit_id (str): Exhibit ID to delete
-
-        Returns:
-            bool: True if successful
-        """
+    def _load_exhibits(self) -> None:
+        if not (self.exhibit_index_path.exists() and self.exhibit_meta_path.exists()):
+            return
         try:
-            if self._use_faiss:
-                return self.exhibits_index.delete(exhibit_id)
+            with open(self.exhibit_meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            self.exhibit_ids = meta.get("ids", [])
+            self.exhibit_metadata = meta.get("metadata", {})
+            self.exhibit_dim = meta.get("dimension")
 
-            self.exhibits_collection.delete(ids=[exhibit_id])
-            return True
+            self.exhibit_index = faiss.read_index(str(self.exhibit_index_path))
+            if self.exhibit_dim is None:
+                self.exhibit_dim = self.exhibit_index.d
+            if self.exhibit_index.ntotal != len(self.exhibit_ids):
+                logger.warning(
+                    "Size of exhibit index does not match the metadata. Resetting index."
+                )
+                self._reset_exhibits()
         except Exception:
-            return False
+            logger.exception("Failed to load exhibit index, creating new one.")
+            self._reset_exhibits()
+
+    def _load_faq(self) -> None:
+        if not (self.faq_index_path.exists() and self.faq_meta_path.exists()):
+            return
+        try:
+            with open(self.faq_meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            self.faq_items = meta.get("items", [])
+            self.faq_dim = meta.get("dimension")
+
+            self.faq_index = faiss.read_index(str(self.faq_index_path))
+            if self.faq_dim is None:
+                self.faq_dim = self.faq_index.d
+            if self.faq_index.ntotal != len(self.faq_items):
+                logger.warning(
+                    "Size of FAQ index does not match the metadata. Resetting index."
+                )
+                self._reset_faq()
+        except Exception:
+            logger.exception("Failed to load FAQ index, creating new one.")
+            self._reset_faq()
+
+    def _save_exhibits(self) -> None:
+        if self.exhibit_index is None:
+            return
+
+        meta = {
+            "dimension": self.exhibit_dim,
+            "ids": self.exhibit_ids,
+            "metadata": self.exhibit_metadata,
+        }
+        with open(self.exhibit_meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        faiss.write_index(self.exhibit_index, str(self.exhibit_index_path))
+
+    def _add_title_embedding(self, exhibit_id: str, embedding: List[float]) -> None:
+        vector = self._normalize(embedding)
+        dim = vector.shape[1]
+
+        if self.title_index is None:
+            self.title_index = faiss.IndexFlatIP(dim)
+            self.title_dim = dim
+        elif dim != self.title_dim:
+            raise ValueError("Dimension of text index (title) does not match.")
+
+        self.title_index.add(vector)
+        self.title_ids.append(exhibit_id)
+        self._save_title_index()
+
+    def _add_desc_embedding(self, exhibit_id: str, embedding: List[float]) -> None:
+        vector = self._normalize(embedding)
+        dim = vector.shape[1]
+
+        if self.desc_index is None:
+            self.desc_index = faiss.IndexFlatIP(dim)
+            self.desc_dim = dim
+        elif dim != self.desc_dim:
+            raise ValueError("Dimension of text index (desc) does not match.")
+
+        self.desc_index.add(vector)
+        self.desc_ids.append(exhibit_id)
+        self._save_desc_index()
+
+    def _save_faq(self) -> None:
+        if self.faq_index is None:
+            return
+
+        meta = {"dimension": self.faq_dim, "items": self.faq_items}
+        with open(self.faq_meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        faiss.write_index(self.faq_index, str(self.faq_index_path))
+
+    def _save_title_index(self) -> None:
+        if self.title_index is None:
+            return
+
+        meta = {"dimension": self.title_dim, "ids": self.title_ids}
+        with open(self.title_meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        faiss.write_index(self.title_index, str(self.title_index_path))
+
+    def _save_desc_index(self) -> None:
+        if self.desc_index is None:
+            return
+
+        meta = {"dimension": self.desc_dim, "ids": self.desc_ids}
+        with open(self.desc_meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        faiss.write_index(self.desc_index, str(self.desc_index_path))
+
+    def _reset_exhibits(self) -> None:
+        self.exhibit_index = None
+        self.exhibit_dim = None
+        self.exhibit_ids = []
+        self.exhibit_metadata = {}
+        self._reset_title_index()
+        self._reset_desc_index()
+
+    def _reset_faq(self) -> None:
+        self.faq_index = None
+        self.faq_dim = None
+        self.faq_items = []
+
+    def _load_title_index(self) -> None:
+        if not (self.title_index_path.exists() and self.title_meta_path.exists()):
+            return
+        try:
+            with open(self.title_meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            self.title_ids = meta.get("ids", [])
+            self.title_dim = meta.get("dimension")
+
+            self.title_index = faiss.read_index(str(self.title_index_path))
+            if self.title_dim is None:
+                self.title_dim = self.title_index.d
+            if self.title_index.ntotal != len(self.title_ids):
+                logger.warning(
+                    "Size of text index (title) does not match the metadata. Resetting index."
+                )
+                self._reset_title_index()
+        except Exception:
+            logger.exception("Failed to load text index title, creating new one.")
+            self._reset_title_index()
+
+    def _load_desc_index(self) -> None:
+        if not (self.desc_index_path.exists() and self.desc_meta_path.exists()):
+            return
+        try:
+            with open(self.desc_meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            self.desc_ids = meta.get("ids", [])
+            self.desc_dim = meta.get("dimension")
+
+            self.desc_index = faiss.read_index(str(self.desc_index_path))
+            if self.desc_dim is None:
+                self.desc_dim = self.desc_index.d
+            if self.desc_index.ntotal != len(self.desc_ids):
+                logger.warning(
+                    "Size of text index (desc) does not match the metadata. Resetting index."
+                )
+                self._reset_desc_index()
+        except Exception:
+            logger.exception("Failed to load text index desc, creating new one.")
+            self._reset_desc_index()
+
+    def _reset_title_index(self) -> None:
+        self.title_index = None
+        self.title_dim = None
+        self.title_ids = []
+
+    def _reset_desc_index(self) -> None:
+        self.desc_index = None
+        self.desc_dim = None
+        self.desc_ids = []

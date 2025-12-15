@@ -3,7 +3,11 @@ from typing import List, Optional
 
 from PIL import Image
 
-from config.config import EXHIBIT_MATCH_THRESHOLD, FAQ_RELEVANCE_THRESHOLD
+from config.config import (
+    DISPLAY_SCORE_THRESHOLD,
+    EXHIBIT_MATCH_THRESHOLD,
+    FAQ_RELEVANCE_THRESHOLD,
+)
 from database.schemas import ExhibitMetadata, ExhibitSearchResult, FAQSearchResult
 from database.vector_db import VectorDatabase
 from models.text_encoder import TextEncoder
@@ -66,6 +70,7 @@ class GuideAgent:
                 image_embedding=image_embedding_list,
                 limit=limit,
                 score_threshold=threshold,
+                display_threshold=DISPLAY_SCORE_THRESHOLD,
             )
 
             logger.info(f"Recognized {len(results)} exhibits from image")
@@ -149,6 +154,7 @@ class GuideAgent:
                 exhibit_id=exhibit_id,
                 limit=limit,
                 score_threshold=threshold,
+                display_threshold=DISPLAY_SCORE_THRESHOLD,
             )
 
             logger.info(
@@ -200,22 +206,55 @@ class GuideAgent:
             List[ExhibitSearchResult]: List of ExhibitSearchResult sorted by similarity score
         """
         try:
-            query_embedding = self.vision_encoder.encode_text(query)
-            query_embedding_list = query_embedding.tolist()
-
             threshold = (
                 score_threshold
                 if score_threshold is not None
                 else EXHIBIT_MATCH_THRESHOLD
             )
-            results = self.vector_db.search_exhibit(
+            display_threshold = DISPLAY_SCORE_THRESHOLD
+
+            text_emb = self.text_encoder.encode_text(query).tolist()
+
+            title_results = self.vector_db.search_text(
+                query_embedding=text_emb,
+                variant="title",
+                limit=limit,
+                score_threshold=display_threshold,
+                display_threshold=display_threshold,
+            )
+            if title_results and title_results[0].similarity_score >= threshold:
+                logger.info(
+                    f"Found {len(title_results)} exhibits by title/artist for query: {query}"
+                )
+                return title_results
+
+            desc_results = self.vector_db.search_text(
+                query_embedding=text_emb,
+                variant="desc",
+                limit=limit,
+                score_threshold=display_threshold,
+                display_threshold=display_threshold,
+            )
+            if desc_results and desc_results[0].similarity_score >= threshold:
+                logger.info(
+                    f"Found {len(desc_results)} exhibits by description/facts for query: {query}"
+                )
+                return desc_results
+
+            query_embedding = self.vision_encoder.encode_text(query)
+            query_embedding_list = query_embedding.tolist()
+
+            image_results = self.vector_db.search_exhibit(
                 image_embedding=query_embedding_list,
                 limit=limit,
                 score_threshold=threshold,
+                display_threshold=display_threshold,
             )
 
-            logger.info(f"Found {len(results)} exhibits for text query: {query}")
-            return results
+            logger.info(
+                f"Found {len(image_results)} exhibits by image for query: {query}"
+            )
+            return image_results
 
         except Exception as e:
             logger.error(f"Error searching exhibits by text: {e}", exc_info=True)

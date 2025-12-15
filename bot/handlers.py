@@ -21,7 +21,6 @@ from bot.utils import (
     format_vlm_answer,
     truncate_text,
 )
-from config.config import VECTOR_BACKEND
 from database.vector_db import VectorDatabase
 
 logger = logging.getLogger(__name__)
@@ -66,7 +65,7 @@ def get_agent(context: ContextTypes.DEFAULT_TYPE) -> GuideAgent:
         GuideAgent: Agent instance
     """
     if AGENT_KEY not in context.bot_data:
-        vector_db = VectorDatabase(backend=VECTOR_BACKEND)
+        vector_db = VectorDatabase()
         context.bot_data[AGENT_KEY] = GuideAgent(vector_db=vector_db)
     return context.bot_data[AGENT_KEY]
 
