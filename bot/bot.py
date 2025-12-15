@@ -9,7 +9,9 @@ from telegram.ext import (
     filters,
 )
 
+from agent.agent import GuideAgent
 from bot.handlers import (
+    AGENT_KEY,
     callback_handler,
     error_handler,
     help_command,
@@ -18,6 +20,9 @@ from bot.handlers import (
     start_command,
     text_handler,
 )
+from database.vector_db import VectorDatabase
+from models.text_encoder import TextEncoder
+from models.vision_encoder import VisionEncoder
 from config.config import TELEGRAM_BOT_TOKEN
 
 logging.basicConfig(
@@ -32,7 +37,18 @@ def main() -> None:
         logger.error("TELEGRAM_BOT_TOKEN is not set.")
         sys.exit(1)
 
+    logger.info("Preloading vector DB and models...")
+    vector_db = VectorDatabase()
+    vision_encoder = VisionEncoder()
+    text_encoder = TextEncoder()
+    agent = GuideAgent(
+        vector_db=vector_db,
+        vision_encoder=vision_encoder,
+        text_encoder=text_encoder,
+    )
+
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    application.bot_data[AGENT_KEY] = agent
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
