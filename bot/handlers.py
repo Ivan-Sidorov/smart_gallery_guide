@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 AGENT_KEY = "agent"
 CURRENT_EXHIBIT_KEY = "current_exhibit_id"
 WAITING_FOR_QUESTION_KEY = "waiting_for_question"
+SEARCH_MODE_KEY = "search_mode"
 
 
 async def safe_edit_message_text(
@@ -171,6 +172,8 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 user_id = update.effective_user.id
                 context.user_data[user_id] = context.user_data.get(user_id, {})
                 context.user_data[user_id][CURRENT_EXHIBIT_KEY] = exhibit_id
+                context.user_data[user_id].pop(WAITING_FOR_QUESTION_KEY, None)
+                context.user_data[user_id].pop(SEARCH_MODE_KEY, None)
 
             text = format_exhibit_info(result.metadata)
             await processing_msg.edit_text(
@@ -179,6 +182,11 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 parse_mode=ParseMode.MARKDOWN,
             )
         else:
+            if update.effective_user:
+                user_id = update.effective_user.id
+                user_data = context.user_data.get(user_id, {})
+                user_data.pop(SEARCH_MODE_KEY, None)
+                user_data.pop(WAITING_FOR_QUESTION_KEY, None)
             text = format_exhibit_search_results(results)
             await processing_msg.edit_text(
                 truncate_text(text),
@@ -190,62 +198,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error(f"Error in photo_handler: {e}", exc_info=True)
         await processing_msg.edit_text(
             "Произошла ошибка при обработке изображения. Попробуйте еще раз."
-        )
-
-
-async def photo_with_caption_handler(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """
-    Handle photo with caption (answer question about image).
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
-    """
-    if not update.message or not update.message.caption:
-        return
-
-    question = update.message.caption.strip()
-
-    processing_msg = await update.message.reply_text("Обрабатываю вопрос...")
-
-    try:
-        image = await download_photo(update, context)
-        if not image:
-            await processing_msg.edit_text("Не удалось загрузить изображение.")
-            return
-
-        exhibit_id = None
-        if update.effective_user:
-            user_id = update.effective_user.id
-            user_data = context.user_data.get(user_id, {})
-            exhibit_id = user_data.get(CURRENT_EXHIBIT_KEY)
-
-        if not exhibit_id:
-            await processing_msg.edit_text(
-                "Сначала распознайте экспонат, отправив фото без подписи."
-            )
-            return
-
-        agent = get_agent(context)
-
-        await processing_msg.edit_text("Генерирую ответ...")
-        answer = await agent.answer_question_about_image(
-            image=image, question=question, exhibit_id=exhibit_id
-        )
-
-        formatted_answer = format_vlm_answer(answer)
-        await processing_msg.edit_text(
-            truncate_text(formatted_answer),
-            reply_markup=get_back_to_exhibit_keyboard(exhibit_id),
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-    except Exception as e:
-        logger.error(f"Error in photo_with_caption_handler: {e}", exc_info=True)
-        await processing_msg.edit_text(
-            "Произошла ошибка при обработке вопроса. Попробуйте еще раз."
         )
 
 
@@ -261,10 +213,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     text = update.message.text.strip()
+    user_id = update.effective_user.id if update.effective_user else None
+    user_data = {}
+    if user_id:
+        user_data = context.user_data.get(user_id, {})
+        context.user_data[user_id] = user_data
 
     if text == "Поиск экспонатов":
+        if user_id:
+            user_data[SEARCH_MODE_KEY] = True
+            user_data.pop(WAITING_FOR_QUESTION_KEY, None)
         await update.message.reply_text(
-            "Отправьте фотографию экспоната или напишите название/описание для поиска."
+            "Отправьте новое фото экспоната или напишите название/описание для поиска "
+            "другого экспоната."
         )
         return
 
@@ -273,61 +234,85 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     if text == "Отмена":
-        if update.effective_user:
-            user_id = update.effective_user.id
-            user_data = context.user_data.get(user_id, {})
+        if user_id:
             user_data.pop(WAITING_FOR_QUESTION_KEY, None)
+            user_data.pop(SEARCH_MODE_KEY, None)
         await update.message.reply_text("Отменено.", reply_markup=get_main_keyboard())
         return
 
-    if update.effective_user:
-        user_id = update.effective_user.id
-        user_data = context.user_data.get(user_id, {})
-        if user_data.get(WAITING_FOR_QUESTION_KEY):
-            await update.message.reply_text(
-                "Пожалуйста, отправьте фото с этим вопросом в подписи."
-            )
-            return
+    search_mode = user_data.get(SEARCH_MODE_KEY, False) if user_id else False
+    current_exhibit_id = user_data.get(CURRENT_EXHIBIT_KEY) if user_id else None
 
-    processing_msg = await update.message.reply_text("Ищу экспонаты...")
+    if search_mode:
+        processing_msg = await update.message.reply_text("Ищу экспонаты...")
+
+        try:
+            agent = get_agent(context)
+            results = await agent.search_exhibits_by_text(text)
+
+            if not results:
+                await processing_msg.edit_text(
+                    "Экспонаты не найдены. Попробуйте другой запрос или отправьте фото."
+                )
+                return
+
+            if len(results) == 1:
+                result = results[0]
+                exhibit_id = result.exhibit_id
+
+                if user_id:
+                    context.user_data[user_id] = context.user_data.get(user_id, {})
+                    context.user_data[user_id][CURRENT_EXHIBIT_KEY] = exhibit_id
+                    context.user_data[user_id].pop(WAITING_FOR_QUESTION_KEY, None)
+                    context.user_data[user_id].pop(SEARCH_MODE_KEY, None)
+
+                text_result = format_exhibit_info(result.metadata)
+                await processing_msg.edit_text(
+                    truncate_text(text_result),
+                    reply_markup=get_exhibit_keyboard(exhibit_id),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            else:
+                text_result = format_exhibit_search_results(results)
+                await processing_msg.edit_text(
+                    truncate_text(text_result),
+                    reply_markup=get_exhibits_list_keyboard(results),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+
+        except Exception as e:
+            logger.error(f"Error in text_handler: {e}", exc_info=True)
+            await processing_msg.edit_text(
+                "Произошла ошибка при поиске. Попробуйте еще раз."
+            )
+        return
+
+    if not current_exhibit_id:
+        await update.message.reply_text(
+            "Сначала выберите экспонат: отправьте его фото или нажмите «Поиск экспонатов»."
+        )
+        return
+
+    processing_msg = await update.message.reply_text("Отвечаю на вопрос...")
 
     try:
         agent = get_agent(context)
-        results = await agent.search_exhibits_by_text(text)
+        answer = await agent.answer_question_about_exhibit(
+            question=text, exhibit_id=current_exhibit_id
+        )
 
-        if not results:
-            await processing_msg.edit_text(
-                "Экспонаты не найдены. Попробуйте другой запрос или отправьте фото."
-            )
-            return
+        if user_id:
+            user_data.pop(WAITING_FOR_QUESTION_KEY, None)
 
-        if len(results) == 1:
-            result = results[0]
-            exhibit_id = result.exhibit_id
-
-            if update.effective_user:
-                user_id = update.effective_user.id
-                context.user_data[user_id] = context.user_data.get(user_id, {})
-                context.user_data[user_id][CURRENT_EXHIBIT_KEY] = exhibit_id
-
-            text_result = format_exhibit_info(result.metadata)
-            await processing_msg.edit_text(
-                truncate_text(text_result),
-                reply_markup=get_exhibit_keyboard(exhibit_id),
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        else:
-            text_result = format_exhibit_search_results(results)
-            await processing_msg.edit_text(
-                truncate_text(text_result),
-                reply_markup=get_exhibits_list_keyboard(results),
-                parse_mode=ParseMode.MARKDOWN,
-            )
+        await processing_msg.edit_text(
+            truncate_text(format_vlm_answer(answer)),
+            reply_markup=get_back_to_exhibit_keyboard(current_exhibit_id),
+        )
 
     except Exception as e:
         logger.error(f"Error in text_handler: {e}", exc_info=True)
         await processing_msg.edit_text(
-            "Произошла ошибка при поиске. Попробуйте еще раз."
+            "Произошла ошибка при обработке вопроса. Попробуйте еще раз."
         )
 
 
@@ -389,6 +374,8 @@ async def handle_exhibit_selection(
         user_id = update.effective_user.id
         context.user_data[user_id] = context.user_data.get(user_id, {})
         context.user_data[user_id][CURRENT_EXHIBIT_KEY] = exhibit_id
+        context.user_data[user_id].pop(SEARCH_MODE_KEY, None)
+        context.user_data[user_id].pop(WAITING_FOR_QUESTION_KEY, None)
 
     agent = get_agent(context)
     metadata = agent.get_exhibit_info(exhibit_id)
@@ -455,10 +442,11 @@ async def handle_ask_question(
         context.user_data[user_id] = context.user_data.get(user_id, {})
         context.user_data[user_id][CURRENT_EXHIBIT_KEY] = exhibit_id
         context.user_data[user_id][WAITING_FOR_QUESTION_KEY] = True
+        context.user_data[user_id].pop(SEARCH_MODE_KEY, None)
 
     await safe_edit_message_text(
         update.callback_query,
-        "Отправьте фото экспоната с вашим вопросом в подписи.",
+        "Задайте вопрос об экспонате текстом.",
         reply_markup=get_back_to_exhibit_keyboard(exhibit_id),
     )
 

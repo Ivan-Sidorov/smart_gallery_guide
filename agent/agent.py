@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import List, Optional
 
 from PIL import Image
@@ -7,6 +8,7 @@ from config.config import (
     DISPLAY_SCORE_THRESHOLD,
     EXHIBIT_MATCH_THRESHOLD,
     FAQ_RELEVANCE_THRESHOLD,
+    PROJECT_ROOT,
 )
 from database.schemas import ExhibitMetadata, ExhibitSearchResult, FAQSearchResult
 from database.vector_db import VectorDatabase
@@ -119,6 +121,81 @@ class GuideAgent:
 
         except Exception as e:
             logger.error(f"Error answering question about image: {e}", exc_info=True)
+            return f"Произошла ошибка при обработке вопроса: {str(e)}"
+
+    async def answer_question_about_exhibit(
+        self, question: str, exhibit_id: str
+    ) -> str:
+        """
+        Answer a text question about a specific exhibit.
+
+        The method first tries to find an answer in FAQ. If nothing relevant is
+        found, it falls back to VLM using the exhibit image and metadata.
+
+        Args:
+            question (str): User question
+            exhibit_id (str): Exhibit ID
+
+        Returns:
+            str: Answer string
+        """
+        try:
+            metadata = self.vector_db.get_exhibit_metadata(exhibit_id)
+            if not metadata:
+                logger.warning(f"Exhibit {exhibit_id} not found for text question")
+                return "Экспонат не найден. Пожалуйста, выберите экспонат сначала."
+
+            faq_results = await self.search_faq(
+                question=question, exhibit_id=exhibit_id, limit=3
+            )
+            if faq_results:
+                best_match = faq_results[0]
+                if best_match.similarity_score >= FAQ_RELEVANCE_THRESHOLD:
+                    logger.info(
+                        "Answered question from FAQ (exhibit_id: %s, score: %.3f)",
+                        exhibit_id,
+                        best_match.similarity_score,
+                    )
+                    return best_match.answer
+
+            image_path = Path(metadata.image_path)
+            if not image_path.is_absolute():
+                image_path = PROJECT_ROOT / image_path
+
+            if not image_path.exists():
+                logger.warning(
+                    "Image for exhibit %s not found at %s", exhibit_id, image_path
+                )
+                return (
+                    "Не удалось найти изображение экспоната. "
+                    "Попробуйте отправить фото экспоната с вопросом."
+                )
+
+            with Image.open(image_path) as img:
+                exhibit_image = img.convert("RGB")
+
+            context = self._build_exhibit_context(metadata)
+
+            async with VLM() as vlm:
+                answer = await vlm.answer_question(
+                    image=exhibit_image,
+                    question=question,
+                    context=context,
+                )
+
+            logger.info(
+                "Answered question with VLM (exhibit_id: %s) after FAQ fallback",
+                exhibit_id,
+            )
+            return answer
+
+        except Exception as e:
+            logger.error(
+                "Error answering text question about exhibit %s: %s",
+                exhibit_id,
+                e,
+                exc_info=True,
+            )
             return f"Произошла ошибка при обработке вопроса: {str(e)}"
 
     async def search_faq(

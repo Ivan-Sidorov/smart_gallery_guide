@@ -16,7 +16,6 @@ from bot.handlers import (
     error_handler,
     help_command,
     photo_handler,
-    photo_with_caption_handler,
     start_command,
     text_handler,
 )
@@ -53,9 +52,6 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
 
-    application.add_handler(
-        MessageHandler(filters.PHOTO & filters.CAPTION, photo_with_caption_handler)
-    )
     application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler)
