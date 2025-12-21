@@ -1,5 +1,3 @@
-"""Vision Language Model client using vLLM API."""
-
 import base64
 from io import BytesIO
 from typing import Optional
@@ -13,6 +11,7 @@ from config.config import (
     VLLM_VLM_MAX_TOKENS,
     VLLM_VLM_MODEL,
     VLLM_VLM_TEMPERATURE,
+    VLLM_SYSTEM_PROMPT,
 )
 
 
@@ -64,6 +63,7 @@ class VLM:
         context: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        system_prompt: Optional[str] = None,
     ) -> str:
         """
         Answer a question about an image.
@@ -80,6 +80,9 @@ class VLM:
         """
         max_tokens = max_tokens if max_tokens is not None else VLLM_VLM_MAX_TOKENS
         temperature = temperature if temperature is not None else VLLM_VLM_TEMPERATURE
+        system_prompt = (
+            system_prompt if system_prompt is not None else VLLM_SYSTEM_PROMPT
+        )
 
         # Convert image to base64
         image_base64 = self._image_to_base64(image)
@@ -96,6 +99,7 @@ class VLM:
             response = await self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
+                    {"role": "system", "content": system_prompt},
                     {
                         "role": "user",
                         "content": [
@@ -105,7 +109,7 @@ class VLM:
                                 "image_url": {"url": image_url},
                             },
                         ],
-                    }
+                    },
                 ],
                 max_tokens=max_tokens,
                 temperature=temperature,

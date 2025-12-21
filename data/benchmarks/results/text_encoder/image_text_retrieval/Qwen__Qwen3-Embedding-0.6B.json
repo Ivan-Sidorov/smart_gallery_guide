@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "model": "Qwen/Qwen3-Embedding-0.6B",
+    "batch_size": 64,
+    "query_prefix": "",
+    "doc_prefix": "",
+    "n_docs": 100,
+    "n_queries": 100,
+    "encode_seconds_total": 3.9923856258392334
+  },
+  "overall": {
+    "n": 100,
+    "mrr@5": 0.42266666666666663,
+    "map@1": 0.35,
+    "map@5": 0.42266666666666663
+  }
+}

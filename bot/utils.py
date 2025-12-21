@@ -16,13 +16,6 @@ async def download_photo(
 ) -> Optional[Image.Image]:
     """
     Download photo from Telegram message.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Telegram context object
-
-    Returns:
-        Optional[Image.Image]: PIL Image or None if download failed
     """
     try:
         if not update.message or not update.message.photo:
@@ -47,12 +40,6 @@ async def download_photo(
 def format_exhibit_info(metadata: ExhibitMetadata) -> str:
     """
     Format exhibit metadata into a readable message.
-
-    Args:
-        metadata (ExhibitMetadata): ExhibitMetadata object
-
-    Returns:
-        str: Formatted string with exhibit information
     """
     lines = [f"*{metadata.title}*"]
 
@@ -75,12 +62,6 @@ def format_exhibit_info(metadata: ExhibitMetadata) -> str:
 def format_exhibit_search_results(results: List[ExhibitSearchResult]) -> str:
     """
     Format exhibit search results into a readable message.
-
-    Args:
-        results (List[ExhibitSearchResult]): List of ExhibitSearchResult objects
-
-    Returns:
-        str: Formatted string with search results
     """
     if not results:
         return "Экспонаты не найдены."
@@ -104,12 +85,6 @@ def format_exhibit_search_results(results: List[ExhibitSearchResult]) -> str:
 def format_faq_results(results: List[FAQSearchResult]) -> str:
     """
     Format FAQ search results into a readable message.
-
-    Args:
-        results (List[FAQSearchResult]): List of FAQSearchResult objects
-
-    Returns:
-        str: Formatted string with FAQ results
     """
     if not results:
         return "Похожие вопросы не найдены в базе FAQ."
@@ -128,12 +103,6 @@ def format_faq_results(results: List[FAQSearchResult]) -> str:
 def format_vlm_answer(answer: str) -> str:
     """
     Format VLM answer for display.
-
-    Args:
-        answer (str): Answer string from VLM
-
-    Returns:
-        str: Formatted answer string
     """
     if not answer:
         return "Не удалось получить ответ."
@@ -144,14 +113,6 @@ def format_vlm_answer(answer: str) -> str:
 def truncate_text(text: str, max_length: int = 4096) -> str:
     """
     Truncate text to maximum length for Telegram message.
-
-
-    Args:
-        text (str): Text to truncate
-        max_length (int): Maximum length. Defaults to 4096.
-
-    Returns:
-        str: Truncated text with ellipsis if needed
     """
     if len(text) <= max_length:
         return text

@@ -16,7 +16,25 @@
   * VLM: Qwen3-VL-8B-Instruct
 
 ## Установка
-TBD
+Сначала необходимо склонировать репозиторий:
+
+```bash
+git clone https://github.com/Ivan-Sidorov/smart_gallery_guide.git
+```
+
+Затем перейти в директорию проекта и установить зависимости:
+
+```bash
+# переходим в проект
+cd smart_gallery_guide
+
+# создаем окружение
+python3 -m venv .venv
+source .venv/bin/activate
+
+# ставим зависимости
+pip install -e .
+```
 
 ## Структура проекта
 
@@ -33,58 +51,77 @@ smart_gallery_guide/
 
 ## Использование
 
-### Запуск vLLM сервера
+### Переменные окружения
+На первом шаге необходимо задать переменные окружения. С полным списком можно ознакомиться в `env.example`.
 
-Перед использованием VLM необходимо запустить vLLM сервер:
+### Запуск vLLM сервера
+Перед использованием VLM в сервисе необходимо запустить vLLM сервер:
 
 ```bash
-# Запуск сервера
 ./scripts/start_vllm_server.sh
-
-# Или с кастомными параметрами
-./scripts/start_vllm_server.sh \
-    --model Qwen/Qwen3-VL-8B-Instruct \
-    --port 8000 \
-    --gpu-memory-utilization 0.9
 ```
 
-Скрипт поддерживает следующие параметры:
-* `--model`: название модели (по умолчанию из .env или конфига)
-* `--host`: хост для биндинга (по умолчанию 0.0.0.0)
-* `--port`: порт (по умолчанию 8000)
-* `--tensor-parallel-size`: количество GPU для параллелизма
-* `--gpu-memory-utilization`: использование GPU памяти (0.0-1.0)
-* `--max-model-len`: максимальная длина модели
-* `--trust-remote-code`: доверять удаленному коду
-* `--dtype`: тип данных (auto/float16/bfloat16)
+### Запуск сервиса
+Далее необходимо запустить самого бота:
 
-Скрипт автоматически загружает переменные из `.env` файла, если он существует.
-
-### Пример использования VLM
-
-```python
-from PIL import Image
-from models.vlm import VLM
-
-async with VLM() as vlm:
-    image = Image.open("path/to/image.jpg")
-    answer = await vlm.answer_question(
-        image=image,
-        question="Что изображено на этой картине?",
-        context="Это картина из коллекции музея."
-    )
-    print(answer)
+```bash
+python3 -m bot.bot
 ```
 
-Полный пример можно посмотреть в `scripts/example_vlm_usage.py`.
+## Детали
+
+### Расширение базы экспонатов
+
+Скрипт выгружает изображения и формирует метадату по шаблону `data/metadata/example_exhibit.json`.
+
+Датасет на Hugging Face:
+`https://huggingface.co/datasets/Artificio/WikiArt`
+
+```bash
+# Загрузит 500 картин в data/exhibits и создаст 500 JSON в data/metadata
+python3 scripts/export_wikiart_exhibits.py --count 500
+```
+
+### Расширение метадаты через Perplexity (Sonar)
+
+Скрипт читает `data/metadata/*.json`, берет `title` и `artist`, запрашивает информацию у Perplexity (модель `sonar`) со **structured output (JSON Schema)** и сохраняет результат в `data/metadata_expand/*.json` в формате:
+
+```json
+{
+  "title": "",
+  "artist": "",
+  "year": "",
+  "style": "",
+  "genre": "",
+  "description": "",
+  "interesting_facts": []
+}
+```
+
+Запуск генерации метадаты через Perplexity:
+
+```bash
+python3 scripts/expand_metadata_perplexity.py --limit 500
+```
+
+Объединение базовой метадаты с расщиренной:
+
+```bash
+python3 scripts/merge_metadata_expand.py --limit 500
+```
+
+
 
 ## Конфигурация
 Основные настройки находятся в `.env` файле:
 * `TELEGRAM_BOT_TOKEN` - токен тг бота
-* `FAISS_STORAGE_DIR` - путь к каталогу с индексами FAISS (по умолчанию `./faiss_store`)
+* `FAISS_STORAGE_DIR` - путь к каталогу с индексами FAISS (по умолчанию, `./faiss_store`)
 * `VLLM_API_BASE_URL` - URL vllm API сервера
 * `VLLM_VLM_MODEL` - название VLM модели
 * `VLLM_VLM_MAX_TOKENS` - максимальное количество токенов в ответе
 * `VLLM_VLM_TEMPERATURE` - температура для генерации
 * `VLLM_API_KEY` - vllm API ключ
 * Пороги для поиска и релевантности (`EXHIBIT_MATCH_THRESHOLD`, `FAQ_RELEVANCE_THRESHOLD`)
+* `PERPLEXITY_API_KEY` - API ключ Perplexity (для `scripts/expand_metadata_perplexity.py`)
+* `PERPLEXITY_BASE_URL` - base URL Perplexity API (по умолчанию, `https://api.perplexity.ai`)
+* `PERPLEXITY_MODEL` - модель Perplexity (по умолчанию, `sonar`)

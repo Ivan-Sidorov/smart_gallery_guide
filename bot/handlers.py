@@ -1,9 +1,10 @@
 import logging
+import asyncio
 from typing import Optional
 
 from telegram import Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import ContextTypes
 
 from agent.agent import GuideAgent
@@ -32,38 +33,108 @@ WAITING_FOR_QUESTION_KEY = "waiting_for_question"
 SEARCH_MODE_KEY = "search_mode"
 
 
-async def safe_edit_message_text(
-    callback_query, text: str, reply_markup=None, parse_mode=None
+async def safe_edit_text(
+    text: str,
+    *,
+    callback_query=None,
+    message=None,
+    update: Optional[Update] = None,
+    reply_markup=None,
+    parse_mode=None,
 ) -> None:
     """
-    Safely edit message text.
-
-    Args:
-        callback_query: Telegram callback query object
-        text (str): Message text
-        reply_markup: Optional reply markup
-        parse_mode: Optional parse mode
+    Safely edit a Telegram message, with fallback to sending a new message.
     """
-    try:
-        await callback_query.edit_message_text(
-            text, reply_markup=reply_markup, parse_mode=parse_mode
-        )
-    except BadRequest as e:
-        if "Message is not modified" in str(e):
-            await callback_query.answer()
-        else:
+
+    def _fallback_message():
+        if callback_query is not None and getattr(callback_query, "message", None):
+            return callback_query.message
+        if update is not None and getattr(update, "effective_message", None):
+            return update.effective_message
+        if message is not None:
+            return message
+        return None
+
+    for attempt in range(3):
+        try:
+            if callback_query is not None:
+                await callback_query.edit_message_text(
+                    text, reply_markup=reply_markup, parse_mode=parse_mode
+                )
+            elif message is not None:
+                await message.edit_text(
+                    text, reply_markup=reply_markup, parse_mode=parse_mode
+                )
+            else:
+                fallback_msg = _fallback_message()
+                if fallback_msg is not None:
+                    await safe_reply_text(
+                        fallback_msg,
+                        text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                elif callback_query is not None:
+                    await callback_query.answer()
+            return
+        except BadRequest as e:
+            err = str(e)
+            if "Message is not modified" in err:
+                if callback_query is not None:
+                    await callback_query.answer()
+                return
+            if "Message can't be edited" in err or "message to edit not found" in err:
+                fallback_msg = _fallback_message()
+                if fallback_msg is not None:
+                    await safe_reply_text(
+                        fallback_msg,
+                        text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                elif callback_query is not None:
+                    await callback_query.answer()
+                return
             raise
+        except (TimedOut, NetworkError) as e:
+            if attempt < 2:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
+            logger.warning("Telegram API timeout while editing message: %s", e)
+            fallback_msg = _fallback_message()
+            if fallback_msg is not None:
+                await safe_reply_text(
+                    fallback_msg,
+                    text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+            return
+
+
+async def safe_reply_text(
+    message, text: str, reply_markup=None, parse_mode=None
+) -> None:
+    """
+    Send a message with retries on Telegram network timeouts.
+    """
+    for attempt in range(3):
+        try:
+            await message.reply_text(
+                text, reply_markup=reply_markup, parse_mode=parse_mode
+            )
+            return
+        except (TimedOut, NetworkError) as e:
+            if attempt < 2:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
+            logger.warning("Telegram API timeout while sending message: %s", e)
+            return
 
 
 def get_agent(context: ContextTypes.DEFAULT_TYPE) -> GuideAgent:
     """
     Get or create GuideAgent instance from context.
-
-    Args:
-        context (ContextTypes.DEFAULT_TYPE): Bot context
-
-    Returns:
-        GuideAgent: Agent instance
     """
     if AGENT_KEY not in context.bot_data:
         vector_db = VectorDatabase()
@@ -74,10 +145,6 @@ def get_agent(context: ContextTypes.DEFAULT_TYPE) -> GuideAgent:
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle /start command.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
     """
     welcome_message = (
         "Это умный гид для картинной галереи!\n\n"
@@ -104,10 +171,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle /help command.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
     """
     help_message = (
         "*Помощь*\n\n"
@@ -119,8 +182,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "3. *Вопросы об экспонате:*\n"
         "   После распознавания экспоната вы можете задать вопрос, "
         "отправив фото с подписью или используя кнопку 'Задать вопрос'.\n\n"
-        "4. *FAQ:*\n"
-        "   Используйте кнопку 'Поиск в FAQ' для поиска похожих вопросов.\n\n"
         "*Команды:*\n"
         "/start - Начать работу с ботом\n"
         "/help - Показать эту справку"
@@ -136,31 +197,38 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle photo messages - recognize exhibit.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
     """
     if not update.message:
         return
 
-    processing_msg = await update.message.reply_text("Обрабатываю изображение...")
+    processing_msg = await update.message.reply_text(
+        "Обрабатываю изображение...",
+        reply_markup=get_main_keyboard(),
+    )
 
     try:
         image = await download_photo(update, context)
         if not image:
-            await processing_msg.edit_text("Не удалось загрузить изображение.")
+            await safe_edit_text(
+                "Не удалось загрузить изображение.",
+                update=update,
+                message=processing_msg,
+            )
             return
 
         agent = get_agent(context)
 
-        await processing_msg.edit_text("Распознаю экспонат...")
+        await safe_edit_text(
+            "Распознаю экспонат...", update=update, message=processing_msg
+        )
         results = await agent.recognize_exhibit(image)
 
         if not results:
-            await processing_msg.edit_text(
+            await safe_edit_text(
                 "Экспонат не найден. Попробуйте другое изображение или "
-                "используйте текстовый поиск."
+                "используйте текстовый поиск.",
+                update=update,
+                message=processing_msg,
             )
             return
 
@@ -176,8 +244,10 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 context.user_data[user_id].pop(SEARCH_MODE_KEY, None)
 
             text = format_exhibit_info(result.metadata)
-            await processing_msg.edit_text(
+            await safe_edit_text(
                 truncate_text(text),
+                update=update,
+                message=processing_msg,
                 reply_markup=get_exhibit_keyboard(exhibit_id),
                 parse_mode=ParseMode.MARKDOWN,
             )
@@ -188,26 +258,26 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 user_data.pop(SEARCH_MODE_KEY, None)
                 user_data.pop(WAITING_FOR_QUESTION_KEY, None)
             text = format_exhibit_search_results(results)
-            await processing_msg.edit_text(
+            await safe_edit_text(
                 truncate_text(text),
+                update=update,
+                message=processing_msg,
                 reply_markup=get_exhibits_list_keyboard(results),
                 parse_mode=ParseMode.MARKDOWN,
             )
 
     except Exception as e:
         logger.error(f"Error in photo_handler: {e}", exc_info=True)
-        await processing_msg.edit_text(
-            "Произошла ошибка при обработке изображения. Попробуйте еще раз."
+        await safe_edit_text(
+            "Произошла ошибка при обработке изображения. Попробуйте еще раз.",
+            update=update,
+            message=processing_msg,
         )
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle text messages - search exhibits or handle questions.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
     """
     if not update.message or not update.message.text:
         return
@@ -225,7 +295,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             user_data.pop(WAITING_FOR_QUESTION_KEY, None)
         await update.message.reply_text(
             "Отправьте новое фото экспоната или напишите название/описание для поиска "
-            "другого экспоната."
+            "другого экспоната.",
+            reply_markup=get_main_keyboard(),
         )
         return
 
@@ -244,15 +315,20 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     current_exhibit_id = user_data.get(CURRENT_EXHIBIT_KEY) if user_id else None
 
     if search_mode:
-        processing_msg = await update.message.reply_text("Ищу экспонаты...")
+        processing_msg = await update.message.reply_text(
+            "Ищу экспонаты...",
+            reply_markup=get_main_keyboard(),
+        )
 
         try:
             agent = get_agent(context)
             results = await agent.search_exhibits_by_text(text)
 
             if not results:
-                await processing_msg.edit_text(
-                    "Экспонаты не найдены. Попробуйте другой запрос или отправьте фото."
+                await safe_edit_text(
+                    "Экспонаты не найдены. Попробуйте другой запрос или отправьте фото.",
+                    update=update,
+                    message=processing_msg,
                 )
                 return
 
@@ -267,33 +343,43 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     context.user_data[user_id].pop(SEARCH_MODE_KEY, None)
 
                 text_result = format_exhibit_info(result.metadata)
-                await processing_msg.edit_text(
+                await safe_edit_text(
                     truncate_text(text_result),
+                    update=update,
+                    message=processing_msg,
                     reply_markup=get_exhibit_keyboard(exhibit_id),
                     parse_mode=ParseMode.MARKDOWN,
                 )
             else:
                 text_result = format_exhibit_search_results(results)
-                await processing_msg.edit_text(
+                await safe_edit_text(
                     truncate_text(text_result),
+                    update=update,
+                    message=processing_msg,
                     reply_markup=get_exhibits_list_keyboard(results),
                     parse_mode=ParseMode.MARKDOWN,
                 )
 
         except Exception as e:
             logger.error(f"Error in text_handler: {e}", exc_info=True)
-            await processing_msg.edit_text(
-                "Произошла ошибка при поиске. Попробуйте еще раз."
+            await safe_edit_text(
+                "Произошла ошибка при поиске. Попробуйте еще раз.",
+                update=update,
+                message=processing_msg,
             )
         return
 
     if not current_exhibit_id:
         await update.message.reply_text(
-            "Сначала выберите экспонат: отправьте его фото или нажмите «Поиск экспонатов»."
+            "Сначала выберите экспонат: отправьте его фото или нажмите «Поиск экспонатов».",
+            reply_markup=get_main_keyboard(),
         )
         return
 
-    processing_msg = await update.message.reply_text("Отвечаю на вопрос...")
+    processing_msg = await update.message.reply_text(
+        "Отвечаю на вопрос...",
+        reply_markup=get_main_keyboard(),
+    )
 
     try:
         agent = get_agent(context)
@@ -304,25 +390,25 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if user_id:
             user_data.pop(WAITING_FOR_QUESTION_KEY, None)
 
-        await processing_msg.edit_text(
+        await safe_edit_text(
             truncate_text(format_vlm_answer(answer)),
+            update=update,
+            message=processing_msg,
             reply_markup=get_back_to_exhibit_keyboard(current_exhibit_id),
         )
 
     except Exception as e:
         logger.error(f"Error in text_handler: {e}", exc_info=True)
-        await processing_msg.edit_text(
-            "Произошла ошибка при обработке вопроса. Попробуйте еще раз."
+        await safe_edit_text(
+            "Произошла ошибка при обработке вопроса. Попробуйте еще раз.",
+            update=update,
+            message=processing_msg,
         )
 
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle callback queries from inline buttons.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
     """
     if not update.callback_query:
         return
@@ -335,25 +421,27 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     try:
+        exhibit_id = callback_data.split(":", 1)[1]
         if callback_data.startswith("select_exhibit:"):
-            exhibit_id = callback_data.split(":", 1)[1]
             await handle_exhibit_selection(update, context, exhibit_id)
 
         elif callback_data.startswith("exhibit_info:"):
-            exhibit_id = callback_data.split(":", 1)[1]
             await handle_exhibit_info(update, context, exhibit_id)
 
         elif callback_data.startswith("ask_question:"):
-            exhibit_id = callback_data.split(":", 1)[1]
             await handle_ask_question(update, context, exhibit_id)
 
         elif callback_data.startswith("search_faq:"):
-            exhibit_id = callback_data.split(":", 1)[1]
             await handle_search_faq(update, context, exhibit_id)
 
     except Exception as e:
         logger.error(f"Error in callback_handler: {e}", exc_info=True)
         await query.edit_message_text("Произошла ошибка. Попробуйте еще раз.")
+        if query.message:
+            await query.message.reply_text(
+                "Открыл главное меню — используйте кнопки ниже.",
+                reply_markup=get_main_keyboard(),
+            )
 
 
 async def handle_exhibit_selection(
@@ -361,11 +449,6 @@ async def handle_exhibit_selection(
 ) -> None:
     """
     Handle exhibit selection from list.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
-        exhibit_id (str): Selected exhibit ID
     """
     if not update.callback_query:
         return
@@ -381,13 +464,20 @@ async def handle_exhibit_selection(
     metadata = agent.get_exhibit_info(exhibit_id)
 
     if not metadata:
-        await safe_edit_message_text(update.callback_query, "Экспонат не найден.")
+        await safe_edit_text(
+            "Экспонат не найден.", callback_query=update.callback_query
+        )
+        if update.callback_query.message:
+            await update.callback_query.message.reply_text(
+                "Открыл главное меню — используйте кнопки ниже.",
+                reply_markup=get_main_keyboard(),
+            )
         return
 
     text = format_exhibit_info(metadata)
-    await safe_edit_message_text(
-        update.callback_query,
+    await safe_edit_text(
         truncate_text(text),
+        callback_query=update.callback_query,
         reply_markup=get_exhibit_keyboard(exhibit_id),
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -398,11 +488,6 @@ async def handle_exhibit_info(
 ) -> None:
     """
     Handle exhibit info request.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
-        exhibit_id (str): Exhibit ID
     """
     if not update.callback_query:
         return
@@ -411,13 +496,20 @@ async def handle_exhibit_info(
     metadata = agent.get_exhibit_info(exhibit_id)
 
     if not metadata:
-        await safe_edit_message_text(update.callback_query, "Экспонат не найден.")
+        await safe_edit_text(
+            "Экспонат не найден.", callback_query=update.callback_query
+        )
+        if update.callback_query.message:
+            await update.callback_query.message.reply_text(
+                "Открыл главное меню — используйте кнопки ниже.",
+                reply_markup=get_main_keyboard(),
+            )
         return
 
     text = format_exhibit_info(metadata)
-    await safe_edit_message_text(
-        update.callback_query,
+    await safe_edit_text(
         truncate_text(text),
+        callback_query=update.callback_query,
         reply_markup=get_exhibit_keyboard(exhibit_id),
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -428,11 +520,6 @@ async def handle_ask_question(
 ) -> None:
     """
     Handle ask question request.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
-        exhibit_id (str): Exhibit ID
     """
     if not update.callback_query:
         return
@@ -444,9 +531,9 @@ async def handle_ask_question(
         context.user_data[user_id][WAITING_FOR_QUESTION_KEY] = True
         context.user_data[user_id].pop(SEARCH_MODE_KEY, None)
 
-    await safe_edit_message_text(
-        update.callback_query,
+    await safe_edit_text(
         "Задайте вопрос об экспонате текстом.",
+        callback_query=update.callback_query,
         reply_markup=get_back_to_exhibit_keyboard(exhibit_id),
     )
 
@@ -456,11 +543,6 @@ async def handle_search_faq(
 ) -> None:
     """
     Handle FAQ search request.
-
-    Args:
-        update (Update): Telegram update object
-        context (ContextTypes.DEFAULT_TYPE): Bot context
-        exhibit_id (str): Exhibit ID
     """
     if not update.callback_query:
         return
@@ -472,9 +554,9 @@ async def handle_search_faq(
         message_text = update.callback_query.message.text
 
     if not message_text:
-        await safe_edit_message_text(
-            update.callback_query,
+        await safe_edit_text(
             "Напишите ваш вопрос для поиска в FAQ.",
+            callback_query=update.callback_query,
             reply_markup=get_back_to_exhibit_keyboard(exhibit_id),
         )
         return
@@ -488,18 +570,18 @@ async def handle_search_faq(
         results = await agent.search_faq(question=question, exhibit_id=exhibit_id)
 
         text = format_faq_results(results)
-        await safe_edit_message_text(
-            update.callback_query,
+        await safe_edit_text(
             truncate_text(text),
+            callback_query=update.callback_query,
             reply_markup=get_back_to_exhibit_keyboard(exhibit_id),
             parse_mode=ParseMode.MARKDOWN,
         )
 
     except Exception as e:
         logger.error(f"Error in handle_search_faq: {e}", exc_info=True)
-        await safe_edit_message_text(
-            update.callback_query,
+        await safe_edit_text(
             "Произошла ошибка при поиске в FAQ.",
+            callback_query=update.callback_query,
             reply_markup=get_back_to_exhibit_keyboard(exhibit_id),
         )
 
@@ -509,14 +591,13 @@ async def error_handler(
 ) -> None:
     """
     Handle errors.
-
-    Args:
-        update (Optional[Update]): Telegram update object (may be None)
-        context (ContextTypes.DEFAULT_TYPE): Bot context
     """
     logger.error(
         f"Exception while handling an update: {context.error}", exc_info=context.error
     )
+
+    if isinstance(context.error, (TimedOut, NetworkError)):
+        return
 
     if update and update.effective_message:
         try:

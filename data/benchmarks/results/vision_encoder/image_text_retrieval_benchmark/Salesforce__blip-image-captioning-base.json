@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "model": "Salesforce/blip-image-captioning-base",
+    "batch_size": 64,
+    "benchmark": "/workspace/smart_gallery_guide/data/benchmarks/image_text_retrieval_benchmark.jsonl",
+    "task": "text->image",
+    "n_docs": 100,
+    "n_queries": 100,
+    "encode_seconds_total": 1.9379937648773193,
+    "backend": "faiss"
+  },
+  "overall": {
+    "n": 100,
+    "mrr@5": 0.012,
+    "map@1": 0.01,
+    "map@5": 0.012
+  }
+}

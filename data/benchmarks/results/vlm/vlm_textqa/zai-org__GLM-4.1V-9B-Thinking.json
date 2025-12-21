@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "model": "zai-org/GLM-4.1V-9B-Thinking",
+    "benchmark": "/workspace/smart_gallery_guide/data/benchmarks/vlm_benchmark.jsonl",
+    "n": 251
+  },
+  "overall": {
+    "n": 251,
+    "accuracy": 0.8924302788844621
+  }
+}

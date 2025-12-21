@@ -8,6 +8,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.request import HTTPXRequest
 
 from agent.agent import GuideAgent
 from bot.handlers import (
@@ -46,7 +47,15 @@ def main() -> None:
         text_encoder=text_encoder,
     )
 
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    request = HTTPXRequest(
+        connect_timeout=10.0,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        pool_timeout=60.0,
+    )
+    application = (
+        Application.builder().token(TELEGRAM_BOT_TOKEN).request(request).build()
+    )
     application.bot_data[AGENT_KEY] = agent
 
     application.add_handler(CommandHandler("start", start_command))

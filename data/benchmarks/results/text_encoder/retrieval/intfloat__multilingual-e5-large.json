@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "model": "intfloat/multilingual-e5-large",
+    "batch_size": 64,
+    "query_prefix": "query: ",
+    "doc_prefix": "passage: ",
+    "n_docs": 100,
+    "n_queries": 100,
+    "encode_seconds_total": 0.464672327041626
+  },
+  "overall": {
+    "n": 100,
+    "mrr@5": 0.9933333333333333,
+    "map@1": 0.99,
+    "map@5": 0.9933333333333333
+  }
+}

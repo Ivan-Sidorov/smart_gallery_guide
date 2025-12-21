@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "model": "google/siglip-base-patch16-224",
+    "batch_size": 64,
+    "benchmark": "/workspace/smart_gallery_guide/data/benchmarks/image_text_retrieval_benchmark.jsonl",
+    "task": "text->image",
+    "n_docs": 100,
+    "n_queries": 100,
+    "encode_seconds_total": 0.7807164192199707,
+    "backend": "faiss"
+  },
+  "overall": {
+    "n": 100,
+    "mrr@5": 0.11983333333333332,
+    "map@1": 0.05,
+    "map@5": 0.11983333333333332
+  }
+}

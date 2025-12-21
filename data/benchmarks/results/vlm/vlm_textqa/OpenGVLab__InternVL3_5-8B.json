@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "model": "OpenGVLab/InternVL3_5-8B",
+    "benchmark": "/workspace/smart_gallery_guide/data/benchmarks/vlm_benchmark.jsonl",
+    "n": 251
+  },
+  "overall": {
+    "n": 251,
+    "accuracy": 0.8844621513944223
+  }
+}

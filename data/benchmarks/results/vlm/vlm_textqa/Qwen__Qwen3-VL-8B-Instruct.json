@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "model": "Qwen/Qwen3-VL-8B-Instruct",
+    "benchmark": "/workspace/smart_gallery_guide/data/benchmarks/vlm_benchmark.jsonl",
+    "n": 251
+  },
+  "overall": {
+    "n": 251,
+    "accuracy": 0.9203187250996016
+  }
+}

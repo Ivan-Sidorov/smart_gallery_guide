@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "model": "deepvk/USER-bge-m3",
+    "batch_size": 64,
+    "query_prefix": "",
+    "doc_prefix": "",
+    "n_docs": 100,
+    "n_queries": 100,
+    "encode_seconds_total": 1.9774250984191895
+  },
+  "overall": {
+    "n": 100,
+    "mrr@5": 0.5708333333333333,
+    "map@1": 0.49,
+    "map@5": 0.5708333333333333
+  }
+}
