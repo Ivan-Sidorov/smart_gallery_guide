@@ -20,25 +20,6 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def get_exhibit_keyboard(exhibit_id: str) -> InlineKeyboardMarkup:
-    """
-    Get keyboard for a specific exhibit.
-    """
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "Задать вопрос", callback_data=f"ask_question:{exhibit_id}"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                "Полная информация", callback_data=f"exhibit_info:{exhibit_id}"
-            ),
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
 def get_exhibits_list_keyboard(
     exhibits: List[ExhibitSearchResult],
 ) -> InlineKeyboardMarkup:

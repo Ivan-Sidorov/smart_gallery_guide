@@ -1,6 +1,7 @@
 import logging
 import asyncio
 from typing import Optional
+from pathlib import Path
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -10,7 +11,6 @@ from telegram.ext import ContextTypes
 from agent.agent import GuideAgent
 from bot.keyboards import (
     get_back_to_exhibit_keyboard,
-    get_exhibit_keyboard,
     get_exhibits_list_keyboard,
     get_main_keyboard,
 )
@@ -132,6 +132,79 @@ async def safe_reply_text(
             return
 
 
+async def safe_reply_photo(
+    message,
+    photo_path: str,
+    caption: str = "",
+    reply_markup=None,
+    parse_mode=None,
+) -> bool:
+    """
+    Send a photo message with retries on Telegram timeouts.
+    """
+    path = Path(photo_path)
+    if not path.exists():
+        logger.warning("Exhibit image not found: %s", photo_path)
+        return False
+
+    for attempt in range(3):
+        try:
+            with path.open("rb") as f:
+                await message.reply_photo(
+                    photo=f,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+            return True
+        except (TimedOut, NetworkError) as e:
+            if attempt < 2:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
+            logger.warning("Telegram API timeout while sending photo: %s", e)
+            return False
+        except BadRequest as e:
+            logger.warning("Telegram API BadRequest while sending photo: %s", e)
+            return False
+        except Exception as e:
+            logger.exception("Unexpected error while sending photo: %s", e)
+            return False
+
+
+async def send_exhibit_card(
+    message,
+    metadata,
+    exhibit_id: str,
+    reply_markup=None,
+) -> None:
+    """
+    Send exhibit info with its image.
+    """
+    full_text = format_exhibit_info(metadata)
+
+    sent_photo = await safe_reply_photo(
+        message,
+        photo_path=metadata.image_path,
+        caption="",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    if not sent_photo:
+        await safe_reply_text(
+            message,
+            truncate_text(full_text),
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    await safe_reply_text(
+        message,
+        truncate_text(full_text),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
 def get_agent(context: ContextTypes.DEFAULT_TYPE) -> GuideAgent:
     """
     Get or create GuideAgent instance from context.
@@ -181,7 +254,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "   Напишите название или описание экспоната для поиска.\n\n"
         "3. *Вопросы об экспонате:*\n"
         "   После распознавания экспоната вы можете задать вопрос, "
-        "отправив фото с подписью или используя кнопку 'Задать вопрос'.\n\n"
+        "просто отправив сообщение с вопросом.\n\n"
         "*Команды:*\n"
         "/start - Начать работу с ботом\n"
         "/help - Показать эту справку"
@@ -245,11 +318,14 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
             text = format_exhibit_info(result.metadata)
             await safe_edit_text(
-                truncate_text(text),
+                "Нашёл экспонат — отправляю карточку ниже.",
                 update=update,
                 message=processing_msg,
-                reply_markup=get_exhibit_keyboard(exhibit_id),
-                parse_mode=ParseMode.MARKDOWN,
+            )
+            await send_exhibit_card(
+                processing_msg,
+                metadata=result.metadata,
+                exhibit_id=exhibit_id,
             )
         else:
             if update.effective_user:
@@ -344,11 +420,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
                 text_result = format_exhibit_info(result.metadata)
                 await safe_edit_text(
-                    truncate_text(text_result),
+                    "Нашёл экспонат — отправляю карточку ниже.",
                     update=update,
                     message=processing_msg,
-                    reply_markup=get_exhibit_keyboard(exhibit_id),
-                    parse_mode=ParseMode.MARKDOWN,
+                )
+                await send_exhibit_card(
+                    processing_msg,
+                    metadata=result.metadata,
+                    exhibit_id=exhibit_id,
                 )
             else:
                 text_result = format_exhibit_search_results(results)
@@ -476,11 +555,15 @@ async def handle_exhibit_selection(
 
     text = format_exhibit_info(metadata)
     await safe_edit_text(
-        truncate_text(text),
+        "Открыл карточку экспоната ниже.",
         callback_query=update.callback_query,
-        reply_markup=get_exhibit_keyboard(exhibit_id),
-        parse_mode=ParseMode.MARKDOWN,
     )
+    if update.callback_query.message:
+        await send_exhibit_card(
+            update.callback_query.message,
+            metadata=metadata,
+            exhibit_id=exhibit_id,
+        )
 
 
 async def handle_exhibit_info(
@@ -508,11 +591,15 @@ async def handle_exhibit_info(
 
     text = format_exhibit_info(metadata)
     await safe_edit_text(
-        truncate_text(text),
+        "Отправляю полную карточку экспоната ниже.",
         callback_query=update.callback_query,
-        reply_markup=get_exhibit_keyboard(exhibit_id),
-        parse_mode=ParseMode.MARKDOWN,
     )
+    if update.callback_query.message:
+        await send_exhibit_card(
+            update.callback_query.message,
+            metadata=metadata,
+            exhibit_id=exhibit_id,
+        )
 
 
 async def handle_ask_question(
