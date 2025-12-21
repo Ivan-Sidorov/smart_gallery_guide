@@ -12,7 +12,8 @@
 ## Технологический стек
 * **Vector DB**: FAISS (IndexFlatIP)
 * **ML Models**:
-  * Vision Encoder: CLIP
+  * Vision Encoder: google/siglip-base-patch16-224
+  * Text Encoder: deepvk/USER-bge-m3
   * VLM: Qwen3-VL-8B-Instruct
 
 ## Установка
