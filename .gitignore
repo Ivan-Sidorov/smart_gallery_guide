@@ -74,3 +74,8 @@ temp_audio/
 .DS_Store
 Thumbs.db
 docs/*.docx
+docs/*.md
+docs/*.pdf
+data/faq/*.json
+data/metadata/*.json
+data/exhibits/*.jpg

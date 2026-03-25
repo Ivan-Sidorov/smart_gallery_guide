@@ -9,12 +9,15 @@ from config.config import (
     EXHIBIT_MATCH_THRESHOLD,
     FAQ_RELEVANCE_THRESHOLD,
     PROJECT_ROOT,
+    VLLM_ENRICHED_SYSTEM_PROMPT,
+    WEB_SEARCH_ENABLED,
 )
 from database.schemas import ExhibitMetadata, ExhibitSearchResult, FAQSearchResult
 from database.vector_db import VectorDatabase
 from models.text_encoder import TextEncoder
 from models.vision_encoder import VisionEncoder
 from models.vlm import VLM
+from services.web_search import WebSearchService
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +42,9 @@ class GuideAgent:
         self.vector_db = vector_db or VectorDatabase()
         self.vision_encoder = vision_encoder or VisionEncoder()
         self.text_encoder = text_encoder or TextEncoder()
+        self.web_search = WebSearchService() if WEB_SEARCH_ENABLED else None
 
-        logger.info("GuideAgent initialized")
+        logger.info("GuideAgent initialized (web_search=%s)", WEB_SEARCH_ENABLED)
 
     async def recognize_exhibit(
         self,
@@ -91,7 +95,10 @@ class GuideAgent:
         """
         Answer a question about an image using VLM.
 
-        Requires exhibit_id to be provided (exhibit must be recognized first).
+        Uses a two-step flow when web search is enabled:
+        1. VLM evaluates whether it can answer from local context alone.
+        2. If not – VLM formulates a search query, results are fetched, and
+           VLM answers again with enriched context.
 
         Args:
             image (Image.Image): PIL Image to analyze
@@ -108,13 +115,9 @@ class GuideAgent:
                 return "Экспонат не найден. Пожалуйста, сначала распознайте экспонат."
 
             context = self._build_exhibit_context(metadata)
-
-            async with VLM() as vlm:
-                answer = await vlm.answer_question(
-                    image=image,
-                    question=question,
-                    context=context,
-                )
+            answer = await self._answer_with_optional_search(
+                image=image, question=question, context=context, exhibit_id=exhibit_id
+            )
 
             logger.info(f"Answered question about image (exhibit_id: {exhibit_id})")
             return answer
@@ -175,13 +178,12 @@ class GuideAgent:
                 exhibit_image = img.convert("RGB")
 
             context = self._build_exhibit_context(metadata)
-
-            async with VLM() as vlm:
-                answer = await vlm.answer_question(
-                    image=exhibit_image,
-                    question=question,
-                    context=context,
-                )
+            answer = await self._answer_with_optional_search(
+                image=exhibit_image,
+                question=question,
+                context=context,
+                exhibit_id=exhibit_id,
+            )
 
             logger.info(
                 "Answered question with VLM (exhibit_id: %s) after FAQ fallback",
@@ -232,6 +234,7 @@ class GuideAgent:
                 limit=limit,
                 score_threshold=threshold,
                 display_threshold=DISPLAY_SCORE_THRESHOLD,
+                query_text=question,
             )
 
             logger.info(
@@ -298,6 +301,7 @@ class GuideAgent:
                 limit=limit,
                 score_threshold=display_threshold,
                 display_threshold=display_threshold,
+                query_text=query,
             )
             if title_results and title_results[0].similarity_score >= threshold:
                 logger.info(
@@ -311,6 +315,7 @@ class GuideAgent:
                 limit=limit,
                 score_threshold=display_threshold,
                 display_threshold=display_threshold,
+                query_text=query,
             )
             if desc_results and desc_results[0].similarity_score >= threshold:
                 logger.info(
@@ -337,6 +342,58 @@ class GuideAgent:
             logger.error(f"Error searching exhibits by text: {e}", exc_info=True)
             return []
 
+    async def _answer_with_optional_search(
+        self,
+        image: Image.Image,
+        question: str,
+        context: str,
+        exhibit_id: str,
+    ) -> str:
+        """
+        Two-step VLM flow:
+        1. VLM decides if it can answer or needs web search.
+        2. If search is needed – fetch snippets, enrich context, answer again.
+        """
+        async with VLM() as vlm:
+            if not self.web_search:
+                return await vlm.answer_question(
+                    image=image, question=question, context=context
+                )
+
+            evaluation = await vlm.evaluate_search_need(
+                image=image, question=question, context=context
+            )
+
+            if not evaluation.needs_search:
+                logger.info(
+                    "VLM answered directly without web search (exhibit_id: %s)",
+                    exhibit_id,
+                )
+                return evaluation.answer
+
+            logger.info(
+                "VLM requested web search (exhibit_id: %s, query: %r)",
+                exhibit_id,
+                evaluation.search_query,
+            )
+            search_results = await self.web_search.search(evaluation.search_query)
+            web_context = WebSearchService.format_results(search_results)
+
+            if web_context:
+                enriched_context = (
+                    f"{context}\n\n"
+                    f"Дополнительная информация из интернета:\n{web_context}"
+                )
+            else:
+                enriched_context = context
+
+            return await vlm.answer_question(
+                image=image,
+                question=question,
+                context=enriched_context,
+                system_prompt=VLLM_ENRICHED_SYSTEM_PROMPT,
+            )
+
     def _build_exhibit_context(self, metadata: ExhibitMetadata) -> str:
         """
         Build context string from exhibit metadata for VLM.
@@ -350,16 +407,37 @@ class GuideAgent:
         context_parts = [f"Название: {metadata.title}"]
 
         if metadata.artist:
-            context_parts.append(f"Художник: {metadata.artist}")
+            context_parts.append(f"Автор: {metadata.artist}")
 
         if metadata.year:
             context_parts.append(f"Год: {metadata.year}")
 
-        context_parts.append(f"Описание: {metadata.description}")
+        if metadata.material:
+            context_parts.append(f"Материал: {metadata.material}")
 
-        if metadata.interesting_facts:
-            facts = ", ".join(metadata.interesting_facts)
-            context_parts.append(f"Интересные факты: {facts}")
+        if metadata.school:
+            context_parts.append(f"Школа/страна: {metadata.school}")
+
+        ai = metadata.additional_info
+        techniq = ai.get("techniq")
+        if techniq:
+            context_parts.append(f"Техника: {techniq}")
+
+        place = ai.get("place")
+        if place:
+            context_parts.append(f"Место: {place}")
+
+        epoque = ai.get("epoque")
+        if epoque:
+            context_parts.append(f"Эпоха: {epoque}")
+
+        description = metadata.display_description
+        if description:
+            context_parts.append(f"Описание: {description}")
+
+        anotation = ai.get("anotation")
+        if anotation:
+            context_parts.append(f"Экспертный комментарий: {anotation}")
 
         return "\n".join(context_parts)
 

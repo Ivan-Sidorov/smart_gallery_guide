@@ -44,17 +44,40 @@ def format_exhibit_info(metadata: ExhibitMetadata) -> str:
     lines = [f"*{metadata.title}*"]
 
     if metadata.artist:
-        lines.append(f"Художник: {metadata.artist}")
+        lines.append(f"Автор: {metadata.artist}")
 
     if metadata.year:
         lines.append(f"Год: {metadata.year}")
 
-    lines.append(f"\n{metadata.description}")
+    mat_parts = []
+    if metadata.material:
+        mat_parts.append(metadata.material)
+    techniq = metadata.additional_info.get("techniq")
+    if techniq:
+        mat_parts.append(techniq)
+    if mat_parts:
+        lines.append(f"Материал/техника: {', '.join(mat_parts)}")
 
-    if metadata.interesting_facts:
-        lines.append("\n*Интересные факты:*")
-        for i, fact in enumerate(metadata.interesting_facts, 1):
-            lines.append(f"{i}. {fact}")
+    geo_parts = []
+    if metadata.school:
+        geo_parts.append(metadata.school)
+    place = metadata.additional_info.get("place")
+    if place:
+        geo_parts.append(place)
+    if geo_parts:
+        lines.append(f"Происхождение: {', '.join(geo_parts)}")
+
+    collection_name = metadata.additional_info.get("collection_name")
+    if collection_name:
+        lines.append(f"Коллекция: {collection_name}")
+
+    description = metadata.display_description
+    if description:
+        lines.append(f"\n{description}")
+
+    anotation = metadata.additional_info.get("anotation")
+    if anotation:
+        lines.append(f"\n*Экспертный комментарий:*\n{anotation}")
 
     return "\n".join(lines)
 

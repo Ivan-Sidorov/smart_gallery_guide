@@ -1,4 +1,6 @@
 import base64
+import re
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Optional
 
@@ -8,11 +10,21 @@ from PIL import Image
 from config.config import (
     VLLM_API_BASE_URL,
     VLLM_API_KEY,
+    VLLM_SEARCH_EVAL_SYSTEM_PROMPT,
     VLLM_VLM_MAX_TOKENS,
     VLLM_VLM_MODEL,
     VLLM_VLM_TEMPERATURE,
     VLLM_SYSTEM_PROMPT,
 )
+
+
+@dataclass
+class SearchEvaluation:
+    """Result of VLM deciding whether external search is needed."""
+
+    needs_search: bool
+    search_query: str = ""
+    answer: str = ""
 
 
 class VLM:
@@ -125,6 +137,82 @@ class VLM:
                 return "Не удалось получить ответ от модели."
         except Exception as e:
             return f"Ошибка при обращении к VLM API: {str(e)}"
+
+    async def evaluate_search_need(
+        self,
+        image: Image.Image,
+        question: str,
+        context: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> SearchEvaluation:
+        """
+        Ask VLM whether it can answer from local context or needs web search.
+
+        Returns SearchEvaluation with either a direct answer or a search query.
+        """
+        max_tokens = max_tokens if max_tokens is not None else VLLM_VLM_MAX_TOKENS
+        temperature = temperature if temperature is not None else VLLM_VLM_TEMPERATURE
+
+        image_base64 = self._image_to_base64(image)
+        image_url = f"data:image/png;base64,{image_base64}"
+
+        if context:
+            prompt = f"Контекст: {context}\n\nВопрос: {question}"
+        else:
+            prompt = f"Вопрос: {question}"
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": VLLM_SEARCH_EVAL_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": image_url},
+                            },
+                        ],
+                    },
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+            raw = ""
+            if response.choices and len(response.choices) > 0:
+                raw = (response.choices[0].message.content or "").strip()
+
+            return self._parse_search_evaluation(raw)
+
+        except Exception as e:
+            return SearchEvaluation(
+                needs_search=False,
+                answer=f"Ошибка при обращении к VLM API: {str(e)}",
+            )
+
+    @staticmethod
+    def _parse_search_evaluation(raw: str) -> SearchEvaluation:
+        """Parse VLM output into SearchEvaluation (ANSWER: / SEARCH: format)."""
+        search_match = re.match(r"(?i)^SEARCH:\s*(.+)", raw, re.DOTALL)
+        if search_match:
+            return SearchEvaluation(
+                needs_search=True,
+                search_query=search_match.group(1).strip(),
+            )
+
+        answer_match = re.match(r"(?i)^ANSWER:\s*(.+)", raw, re.DOTALL)
+        if answer_match:
+            return SearchEvaluation(
+                needs_search=False,
+                answer=answer_match.group(1).strip(),
+            )
+
+        # Fallback: treat entire output as a direct answer
+        return SearchEvaluation(needs_search=False, answer=raw)
 
     async def close(self):
         """Close VLM client."""

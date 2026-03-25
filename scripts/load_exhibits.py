@@ -67,13 +67,35 @@ def load_exhibits_from_directory(
             print(f"Error while encoding image for {exhibit_id}: {e}")
             continue
 
-        title_text = f"{metadata.artist or ''} {metadata.title}".strip()
-        desc_text = " ".join(
-            [
-                metadata.description,
-                " ".join(metadata.interesting_facts or []),
-            ]
+        title_text = " ".join(
+            filter(
+                None,
+                [
+                    metadata.artist or "",
+                    metadata.title,
+                    metadata.school or "",
+                    metadata.year or "",
+                ],
+            )
         ).strip()
+
+        ai = metadata.additional_info
+        desc_parts = [metadata.display_description]
+        for key in (
+            "anotation",
+            "glossary",
+            "text",
+            "epoque",
+            "category",
+            "place",
+            "techniq",
+        ):
+            val = ai.get(key)
+            if val and isinstance(val, str):
+                desc_parts.append(val)
+        if metadata.material:
+            desc_parts.append(metadata.material)
+        desc_text = " ".join(desc_parts).strip()
 
         try:
             title_emb = text_encoder.encode_text(title_text).tolist()
@@ -91,13 +113,17 @@ def load_exhibits_from_directory(
                 embedding.tolist(),
                 metadata,
                 title_embedding=title_emb,
+                title_text=title_text,
                 desc_embedding=desc_emb,
+                desc_text=desc_text,
             )
             print(f"Added exhibit: {metadata.title} (ID: {exhibit_id})")
         except Exception as e:
             print(f"Error while adding exhibit {exhibit_id} to database: {e}")
 
-    print("\nExhibit loading completed!")
+    print("\nExhibit loading completed! Building BM25 indexes...")
+    db.build_bm25_indexes()
+    print("BM25 indexes ready.")
 
 
 if __name__ == "__main__":
