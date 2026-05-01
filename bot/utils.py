@@ -1,6 +1,5 @@
 import io
 import logging
-from typing import List, Optional
 
 from PIL import Image
 from telegram import Update
@@ -11,9 +10,7 @@ from database.schemas import ExhibitMetadata, ExhibitSearchResult, FAQSearchResu
 logger = logging.getLogger(__name__)
 
 
-async def download_photo(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> Optional[Image.Image]:
+async def download_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Image.Image | None:
     """
     Download photo from Telegram message.
     """
@@ -82,7 +79,7 @@ def format_exhibit_info(metadata: ExhibitMetadata) -> str:
     return "\n".join(lines)
 
 
-def format_exhibit_search_results(results: List[ExhibitSearchResult]) -> str:
+def format_exhibit_search_results(results: list[ExhibitSearchResult]) -> str:
     """
     Format exhibit search results into a readable message.
     """
@@ -105,7 +102,7 @@ def format_exhibit_search_results(results: List[ExhibitSearchResult]) -> str:
     return "\n".join(lines)
 
 
-def format_faq_results(results: List[FAQSearchResult]) -> str:
+def format_faq_results(results: list[FAQSearchResult]) -> str:
     """
     Format FAQ search results into a readable message.
     """

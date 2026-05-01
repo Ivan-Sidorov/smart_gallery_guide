@@ -4,12 +4,12 @@ import os
 import random
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
+
 from dotenv import load_dotenv
 from openai import OpenAI
 
-
-PAINTING_INFO_SCHEMA: Dict[str, Any] = {
+PAINTING_INFO_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
@@ -76,7 +76,7 @@ def _build_user_prompt(title: str, artist: str) -> str:
 """.strip()
 
 
-def _schema_payload() -> Dict[str, Any]:
+def _schema_payload() -> dict[str, Any]:
     return {
         "type": "json_schema",
         "json_schema": {
@@ -88,8 +88,8 @@ def _schema_payload() -> Dict[str, Any]:
 
 
 def _extract_title_artist(
-    metadata: Dict[str, Any],
-) -> Tuple[Optional[str], Optional[str]]:
+    metadata: dict[str, Any],
+) -> tuple[str | None, str | None]:
     title = metadata.get("title") or metadata.get("name")
     artist = metadata.get("artist") or metadata.get("author")
     title = title.strip() if isinstance(title, str) else None
@@ -108,7 +108,7 @@ def _safe_json_loads(s: str) -> Any:
     return json.loads(s)
 
 
-def _validate_painting_info(data: Any) -> Dict[str, Any]:
+def _validate_painting_info(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("Response is not a JSON object")
 
@@ -145,9 +145,9 @@ def _call_perplexity(
     model: str,
     title: str,
     artist: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     user_prompt = _build_user_prompt(title=title, artist=artist)
-    last_err: Optional[Exception] = None
+    last_err: Exception | None = None
 
     for attempt in range(1, 6):
         try:

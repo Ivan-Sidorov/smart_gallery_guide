@@ -1,6 +1,5 @@
-import logging
 import asyncio
-from typing import Optional
+import logging
 from pathlib import Path
 
 from telegram import Update
@@ -38,7 +37,7 @@ async def safe_edit_text(
     *,
     callback_query=None,
     message=None,
-    update: Optional[Update] = None,
+    update: Update | None = None,
     reply_markup=None,
     parse_mode=None,
 ) -> None:
@@ -62,9 +61,7 @@ async def safe_edit_text(
                     text, reply_markup=reply_markup, parse_mode=parse_mode
                 )
             elif message is not None:
-                await message.edit_text(
-                    text, reply_markup=reply_markup, parse_mode=parse_mode
-                )
+                await message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
             else:
                 fallback_msg = _fallback_message()
                 if fallback_msg is not None:
@@ -112,17 +109,13 @@ async def safe_edit_text(
             return
 
 
-async def safe_reply_text(
-    message, text: str, reply_markup=None, parse_mode=None
-) -> None:
+async def safe_reply_text(message, text: str, reply_markup=None, parse_mode=None) -> None:
     """
     Send a message with retries on Telegram network timeouts.
     """
     for attempt in range(3):
         try:
-            await message.reply_text(
-                text, reply_markup=reply_markup, parse_mode=parse_mode
-            )
+            await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
             return
         except (TimedOut, NetworkError) as e:
             if attempt < 2:
@@ -291,9 +284,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         agent = get_agent(context)
 
-        await safe_edit_text(
-            "Распознаю экспонат...", update=update, message=processing_msg
-        )
+        await safe_edit_text("Распознаю экспонат...", update=update, message=processing_msg)
         results = await agent.recognize_exhibit(image)
 
         if not results:
@@ -543,9 +534,7 @@ async def handle_exhibit_selection(
     metadata = agent.get_exhibit_info(exhibit_id)
 
     if not metadata:
-        await safe_edit_text(
-            "Экспонат не найден.", callback_query=update.callback_query
-        )
+        await safe_edit_text("Экспонат не найден.", callback_query=update.callback_query)
         if update.callback_query.message:
             await update.callback_query.message.reply_text(
                 "Открыл главное меню — используйте кнопки ниже.",
@@ -553,7 +542,6 @@ async def handle_exhibit_selection(
             )
         return
 
-    text = format_exhibit_info(metadata)
     await safe_edit_text(
         "Открыл карточку экспоната ниже.",
         callback_query=update.callback_query,
@@ -579,9 +567,7 @@ async def handle_exhibit_info(
     metadata = agent.get_exhibit_info(exhibit_id)
 
     if not metadata:
-        await safe_edit_text(
-            "Экспонат не найден.", callback_query=update.callback_query
-        )
+        await safe_edit_text("Экспонат не найден.", callback_query=update.callback_query)
         if update.callback_query.message:
             await update.callback_query.message.reply_text(
                 "Открыл главное меню — используйте кнопки ниже.",
@@ -589,7 +575,6 @@ async def handle_exhibit_info(
             )
         return
 
-    text = format_exhibit_info(metadata)
     await safe_edit_text(
         "Отправляю полную карточку экспоната ниже.",
         callback_query=update.callback_query,
@@ -673,15 +658,11 @@ async def handle_search_faq(
         )
 
 
-async def error_handler(
-    update: Optional[Update], context: ContextTypes.DEFAULT_TYPE
-) -> None:
+async def error_handler(update: Update | None, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle errors.
     """
-    logger.error(
-        f"Exception while handling an update: {context.error}", exc_info=context.error
-    )
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
 
     if isinstance(context.error, (TimedOut, NetworkError)):
         return

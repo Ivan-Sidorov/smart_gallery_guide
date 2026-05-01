@@ -1,76 +1,73 @@
-import os
-from pathlib import Path
+"""Legacy import path for the ``config.config`` module."""
 
-from dotenv import load_dotenv
+from core.settings import PROJECT_ROOT, get_settings
 
-# Load env
-load_dotenv()
+_settings = get_settings()
 
-# Project dir
-PROJECT_ROOT = Path(__file__).parent.parent
+# --------------------------------------------------------------------- Telegram
+TELEGRAM_BOT_TOKEN: str = _settings.telegram_bot_token
 
-# Telegram bot config
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+# ---------------------------------------------------------------------- Chroma
+CHROMA_PERSIST_DIR: str = _settings.chroma_persist_dir
+CHROMA_COLLECTION_EXHIBITS: str = _settings.chroma_collection_exhibits
+CHROMA_COLLECTION_TITLE: str = _settings.chroma_collection_title
+CHROMA_COLLECTION_DESC: str = _settings.chroma_collection_desc
+CHROMA_COLLECTION_FAQ: str = _settings.chroma_collection_faq
 
-# ChromaDB
-CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", str(PROJECT_ROOT / "chroma_store"))
-CHROMA_COLLECTION_EXHIBITS = os.getenv("CHROMA_COLLECTION_EXHIBITS", "exhibits")
-CHROMA_COLLECTION_TITLE = os.getenv("CHROMA_COLLECTION_TITLE", "exhibits_title")
-CHROMA_COLLECTION_DESC = os.getenv("CHROMA_COLLECTION_DESC", "exhibits_desc")
-CHROMA_COLLECTION_FAQ = os.getenv("CHROMA_COLLECTION_FAQ", "faq")
+# ------------------------------------------------------------------------ vLLM
+VLLM_API_BASE_URL: str = _settings.vllm_api_base_url
+VLLM_VLM_MODEL: str = _settings.vllm_vlm_model
+VLLM_VLM_MAX_TOKENS: int = _settings.vllm_vlm_max_tokens
+VLLM_VLM_TEMPERATURE: float = _settings.vllm_vlm_temperature
+VLLM_API_KEY: str = _settings.vllm_api_key
+VLLM_SYSTEM_PROMPT: str = _settings.vllm_system_prompt
+VLLM_SEARCH_EVAL_SYSTEM_PROMPT: str = _settings.vllm_search_eval_system_prompt
+VLLM_ENRICHED_SYSTEM_PROMPT: str = _settings.vllm_enriched_system_prompt
 
-# vLLM config
-VLLM_API_BASE_URL = os.getenv("VLLM_API_BASE_URL", "http://localhost:8000/v1")
-VLLM_VLM_MODEL = os.getenv("VLLM_VLM_MODEL", "Qwen/Qwen3-VL-8B-Instruct")
-VLLM_VLM_MAX_TOKENS = int(os.getenv("VLLM_VLM_MAX_TOKENS", "500"))
-VLLM_VLM_TEMPERATURE = float(os.getenv("VLLM_VLM_TEMPERATURE", "0.7"))
-VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")
-VLLM_SYSTEM_PROMPT = os.getenv(
+# ------------------------------------------------------------------- Encoders
+VISION_ENCODER_MODEL: str = _settings.vision_encoder_model
+TEXT_ENCODER_MODEL: str = _settings.text_encoder_model
+
+# ----------------------------------------------------------------- Thresholds
+EXHIBIT_MATCH_THRESHOLD: float = _settings.exhibit_match_threshold
+FAQ_RELEVANCE_THRESHOLD: float = _settings.faq_relevance_threshold
+DISPLAY_SCORE_THRESHOLD: float = _settings.display_score_threshold
+
+# ----------------------------------------------------------------- Web search
+WEB_SEARCH_ENABLED: bool = _settings.web_search_enabled
+WEB_SEARCH_MAX_RESULTS: int = _settings.web_search_max_results
+
+# ----------------------------------------------------------------- Data paths
+DATA_DIR = _settings.data_dir
+EXHIBITS_DIR = _settings.exhibits_dir
+METADATA_DIR = _settings.metadata_dir
+FAQ_DIR = _settings.faq_dir
+
+__all__ = [
+    "PROJECT_ROOT",
+    "TELEGRAM_BOT_TOKEN",
+    "CHROMA_PERSIST_DIR",
+    "CHROMA_COLLECTION_EXHIBITS",
+    "CHROMA_COLLECTION_TITLE",
+    "CHROMA_COLLECTION_DESC",
+    "CHROMA_COLLECTION_FAQ",
+    "VLLM_API_BASE_URL",
+    "VLLM_VLM_MODEL",
+    "VLLM_VLM_MAX_TOKENS",
+    "VLLM_VLM_TEMPERATURE",
+    "VLLM_API_KEY",
     "VLLM_SYSTEM_PROMPT",
-    "Ты – музейный гид. Отвечай кратко и по делу (1–3 предложения). ",
-)
-
-VLLM_SEARCH_EVAL_SYSTEM_PROMPT = (
-    "Ты – музейный гид-эксперт. Тебе дан вопрос посетителя о музейном экспонате, "
-    "изображение экспоната и справочная информация из базы данных музея.\n\n"
-    "Определи, можешь ли ты дать точный и полный ответ, опираясь ТОЛЬКО на "
-    "предоставленные данные и изображение.\n\n"
-    "Если ДА – ответь в формате:\nANSWER: <твой ответ, 1–3 предложения>\n\n"
-    "Если для точного ответа нужна дополнительная информация – сформулируй один "
-    "поисковый запрос на русском языке в формате:\nSEARCH: <поисковый запрос>\n\n"
-    "Поисковый запрос должен включать название произведения и/или имя автора "
-    "вместе с темой вопроса. Используй строго один из двух форматов ответа."
-)
-
-VLLM_ENRICHED_SYSTEM_PROMPT = (
-    VLLM_SYSTEM_PROMPT + "\n\n"
-    "Используй информацию из базы данных музея как основной источник. "
-    "Дополнительные сведения из интернета используй как вспомогательный источник. "
-    "Если источники противоречат друг другу, отдавай приоритет музейным данным."
-)
-
-# Encoder models
-VISION_ENCODER_MODEL = os.getenv(
-    "VISION_ENCODER_MODEL", "google/siglip-base-patch16-224"
-)
-TEXT_ENCODER_MODEL = os.getenv("TEXT_ENCODER_MODEL", "deepvk/USER-bge-m3")
-
-# Thresholds
-EXHIBIT_MATCH_THRESHOLD = float(os.getenv("EXHIBIT_MATCH_THRESHOLD", "0.6"))
-FAQ_RELEVANCE_THRESHOLD = float(os.getenv("FAQ_RELEVANCE_THRESHOLD", "0.6"))
-DISPLAY_SCORE_THRESHOLD = float(os.getenv("DISPLAY_SCORE_THRESHOLD", "0.5"))
-
-# Web search
-WEB_SEARCH_ENABLED = os.getenv("WEB_SEARCH_ENABLED", "true").lower() in ("true", "1")
-WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
-
-# Data dirs
-DATA_DIR = PROJECT_ROOT / "data"
-EXHIBITS_DIR = DATA_DIR / "exhibits"
-METADATA_DIR = DATA_DIR / "metadata"
-FAQ_DIR = DATA_DIR / "faq"
-
-DATA_DIR.mkdir(exist_ok=True)
-EXHIBITS_DIR.mkdir(exist_ok=True)
-METADATA_DIR.mkdir(exist_ok=True)
-FAQ_DIR.mkdir(exist_ok=True)
+    "VLLM_SEARCH_EVAL_SYSTEM_PROMPT",
+    "VLLM_ENRICHED_SYSTEM_PROMPT",
+    "VISION_ENCODER_MODEL",
+    "TEXT_ENCODER_MODEL",
+    "EXHIBIT_MATCH_THRESHOLD",
+    "FAQ_RELEVANCE_THRESHOLD",
+    "DISPLAY_SCORE_THRESHOLD",
+    "WEB_SEARCH_ENABLED",
+    "WEB_SEARCH_MAX_RESULTS",
+    "DATA_DIR",
+    "EXHIBITS_DIR",
+    "METADATA_DIR",
+    "FAQ_DIR",
+]

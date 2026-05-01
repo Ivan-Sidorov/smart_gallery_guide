@@ -5,11 +5,10 @@ import sys
 import uuid
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
+
 from datasets import load_dataset
-
 from PIL import Image
-
 
 EXCLUDED_GENRES = {
     "religious painting",
@@ -21,7 +20,7 @@ EXCLUDED_GENRES = {
 }
 
 
-def _parse_year(date_str: Optional[str]) -> str:
+def _parse_year(date_str: str | None) -> str:
     if not date_str:
         return ""
     m = re.search(r"(\d{4})", str(date_str))
@@ -32,7 +31,7 @@ def _normalize_genre(genre: str) -> str:
     return (genre or "").strip().lower()
 
 
-def _image_to_pil(image_obj: Any) -> Optional[Image.Image]:
+def _image_to_pil(image_obj: Any) -> Image.Image | None:
     if image_obj is None:
         return None
     if isinstance(image_obj, Image.Image):
@@ -73,7 +72,7 @@ def _build_metadata(
     style: str,
     genre: str,
     image_rel_path: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return {
         "exhibit_id": exhibit_id,
         "title": title,
@@ -96,7 +95,7 @@ def export_wikiart_exhibits(
     max_per_style: int,
     exhibits_dir: Path,
     metadata_dir: Path,
-) -> Tuple[int, Counter, Counter, Counter]:
+) -> tuple[int, Counter, Counter, Counter]:
     exhibits_dir.mkdir(parents=True, exist_ok=True)
     metadata_dir.mkdir(parents=True, exist_ok=True)
 

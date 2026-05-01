@@ -48,8 +48,16 @@ def load_exhibits_from_directory(
             print(f"No metadata file for {exhibit_id}")
             continue
 
-        with open(metadata_file, "r", encoding="utf-8") as f:
-            metadata_dict = json.load(f)
+        raw_bytes = metadata_file.read_bytes()
+        for enc in ("utf-8", "cp1251", "latin-1"):
+            try:
+                metadata_dict = json.loads(raw_bytes.decode(enc))
+                break
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+        else:
+            print(f"Cannot decode metadata file for {exhibit_id}, skipping")
+            continue
 
         metadata_dict["exhibit_id"] = exhibit_id
         metadata_dict["image_path"] = str(image_file)

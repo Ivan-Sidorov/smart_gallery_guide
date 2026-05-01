@@ -34,7 +34,7 @@ def load_faq_from_directory(faq_dir: Path = FAQ_DIR):
 
     for faq_file in faq_files:
         try:
-            with open(faq_file, "r", encoding="utf-8") as f:
+            with open(faq_file, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as e:
             print(f"Error reading {faq_file.name}: {e}")

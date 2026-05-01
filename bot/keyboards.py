@@ -1,5 +1,3 @@
-from typing import List
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
 from database.schemas import ExhibitSearchResult
@@ -21,7 +19,7 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_exhibits_list_keyboard(
-    exhibits: List[ExhibitSearchResult],
+    exhibits: list[ExhibitSearchResult],
 ) -> InlineKeyboardMarkup:
     """
     Get keyboard for selecting an exhibit from search results.
@@ -48,11 +46,7 @@ def get_back_to_exhibit_keyboard(exhibit_id: str) -> InlineKeyboardMarkup:
     Get keyboard with back button to return to exhibit view.
     """
     keyboard = [
-        [
-            InlineKeyboardButton(
-                "Назад к экспонату", callback_data=f"exhibit_info:{exhibit_id}"
-            )
-        ]
+        [InlineKeyboardButton("Назад к экспонату", callback_data=f"exhibit_info:{exhibit_id}")]
     ]
     return InlineKeyboardMarkup(keyboard)
 

@@ -1,11 +1,10 @@
 import argparse
 import json
-import shutil
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any
 
-
-MERGE_KEYS: Tuple[str, ...] = (
+MERGE_KEYS: tuple[str, ...] = (
     "title",
     "artist",
     "year",
@@ -37,14 +36,14 @@ def _is_non_empty_value(value: Any) -> bool:
     return True
 
 
-def _load_json(path: Path) -> Dict[str, Any]:
+def _load_json(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"JSON must be an object: {path}")
     return data
 
 
-def _write_json(path: Path, data: Dict[str, Any]) -> None:
+def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=4) + "\n", encoding="utf-8"
     )
@@ -52,9 +51,9 @@ def _write_json(path: Path, data: Dict[str, Any]) -> None:
 
 def _merge_metadata(
     *,
-    base: Dict[str, Any],
-    expanded: Dict[str, Any],
-) -> Tuple[Dict[str, Any], List[str]]:
+    base: dict[str, Any],
+    expanded: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
     updated_fields = []
     merged = dict(base)
 

@@ -20,7 +20,6 @@ classifiers = [
 
 dependencies = [
     "python-telegram-bot>=22.0",
-    "aiogram>=3.19.0",
 
     "chromadb>=1.0.0",
 
@@ -28,21 +27,28 @@ dependencies = [
     "transformers>=4.51.0",
     "sentence-transformers>=4.0.0",
     "Pillow>=11.2.1",
-    "vllm>=0.8.0",
 
     "openai>=1.70.0",
 
     "python-dotenv>=1.0.0",
-    "numpy==1.26.4",
+    "numpy>=1.26,<3",
     "aiofiles>=23.2.1",
     "pydantic>=2.11.0",
+    "pydantic-settings>=2.5.0",
     "datasets>=2.20.0",
     "pyarrow>=15.0.0",
 
     "nltk>=3.9.1",
     "rank-bm25>=0.2.2",
     "rouge-score>=0.1.2",
-    "duckduckgo-search>=8.0.0",
+    "ddgs>=9.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
 ]
 
 [project.scripts]
@@ -52,5 +58,55 @@ smart-guide-bot = "bot.bot:main"
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["agent", "bot", "config", "database", "models", "services"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "agent*", "bot*", "config*", "database*", "models*", "services*"]
+exclude = ["tests*", "scripts*", "data*", "chroma_store*", "docs*", "deploy*"]
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "data",
+    "chroma_store",
+    # Одноразовые служебные утилиты (indexing, ingest, benchmarks) — не прикладной код.
+    "scripts",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # bugbear
+    "UP",   # pyupgrade
+]
+ignore = [
+    "E501",  # line too long — handled by formatter
+    "B008",  # function calls in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]

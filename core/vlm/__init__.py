@@ -1,4 +1,4 @@
-"""Legacy import path for the ``models.vlm`` module."""
+"""VLM client and prompts."""
 
 from core.vlm.client import VLM, SearchEvaluation
 

@@ -79,3 +79,8 @@ docs/*.pdf
 data/faq/*.json
 data/metadata/*.json
 data/exhibits/*.jpg
+data/*.tar.gz
+data/benchmarks/
+data/real_images/
+scripts/benchmarking/
+scripts/generate_*.py

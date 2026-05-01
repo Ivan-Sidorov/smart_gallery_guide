@@ -20,10 +20,10 @@ from bot.handlers import (
     start_command,
     text_handler,
 )
+from config.config import TELEGRAM_BOT_TOKEN
 from database.vector_db import VectorDatabase
 from models.text_encoder import TextEncoder
 from models.vision_encoder import VisionEncoder
-from config.config import TELEGRAM_BOT_TOKEN
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -53,18 +53,14 @@ def main() -> None:
         write_timeout=60.0,
         pool_timeout=60.0,
     )
-    application = (
-        Application.builder().token(TELEGRAM_BOT_TOKEN).request(request).build()
-    )
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).request(request).build()
     application.bot_data[AGENT_KEY] = agent
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
 
     application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler)
-    )
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     application.add_handler(CallbackQueryHandler(callback_handler))
 

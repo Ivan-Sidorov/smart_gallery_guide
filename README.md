@@ -10,11 +10,12 @@
 В современных музеях услуги гида и аудиогида обладают значительными ограничениями с точки зрения персонализации и гибкости предоставления информации. Традиционные групповые экскурсии, проводимые гидами, не позволяют посетителям адаптировать маршрут под свои интересы. Аудиогиды обеспечивают индивидуальный формат, однако объем выдаваемой информации строго ограничен заранее записанными материалами и не предусматривает интерактивного взаимодействия и возможности получения справок на уникальные, частные вопросы. Современный посетитель заинтересован в свободном изучении экспозиций, выборе темпа осмотра и возможности получения расширенной информации об объектах в реальном времени.
 
 ## Технологический стек
-* **Vector DB**: FAISS (IndexFlatIP)
+* **Vector DB**: ChromaDB (HNSW, cosine similarity) с гибридным поиском поверх BM25 + RRF
 * **ML Models**:
   * Vision Encoder: google/siglip-base-patch16-224
   * Text Encoder: deepvk/USER-bge-m3
-  * VLM: Qwen3-VL-8B-Instruct
+  * VLM: Qwen3-VL-8B-Instruct (через сервер инференса vLLM)
+* **Messenger**: python-telegram-bot
 
 ## Установка
 Сначала необходимо склонировать репозиторий:
@@ -33,21 +34,26 @@ cd smart_gallery_guide
 python3 -m venv .venv
 source .venv/bin/activate
 
-# ставим зависимости
+# ставим зависимости (прод)
 pip install -e .
+
+# ставим зависимости (разработка: pytest, ruff)
+pip install -e ".[dev]"
 ```
 
 ## Структура проекта
 
 ```
 smart_gallery_guide/
-├── bot/              # Telegram бот
-├── agent/            # Агент обработки запросов
-├── models/           # ML модели
-├── database/         # Работа с векторной БД
-├── scripts/          # Утилиты и скрипты
+├── bot/              # Telegram бот (хэндлеры, клавиатуры)
+├── agent/            # Агент-оркестратор запросов
+├── models/           # ML-компоненты: text/vision энкодеры, VLM-клиент
+├── database/         # Обёртка над ChromaDB + гибридный поиск (BM25/RRF)
+├── services/         # Внешние сервисы (web-search)
+├── scripts/          # Утилиты индексации и бенчмаркинга
 ├── config/           # Конфигурация
-└── data/             # Данные экспонатов
+├── tests/            # pytest smoke-тесты
+└── data/             # Данные экспонатов (изображения, метаданные, FAQ)
 ```
 
 ## Использование
@@ -114,15 +120,49 @@ python3 scripts/merge_metadata_expand.py --limit 500
 
 
 ## Конфигурация
-Основные настройки находятся в `.env` файле:
-* `TELEGRAM_BOT_TOKEN` - токен тг бота
-* `FAISS_STORAGE_DIR` - путь к каталогу с индексами FAISS (по умолчанию, `./faiss_store`)
-* `VLLM_API_BASE_URL` - URL vllm API сервера
-* `VLLM_VLM_MODEL` - название VLM модели
-* `VLLM_VLM_MAX_TOKENS` - максимальное количество токенов в ответе
-* `VLLM_VLM_TEMPERATURE` - температура для генерации
-* `VLLM_API_KEY` - vllm API ключ
-* Пороги для поиска и релевантности (`EXHIBIT_MATCH_THRESHOLD`, `FAQ_RELEVANCE_THRESHOLD`)
-* `PERPLEXITY_API_KEY` - API ключ Perplexity (для `scripts/expand_metadata_perplexity.py`)
-* `PERPLEXITY_BASE_URL` - base URL Perplexity API (по умолчанию, `https://api.perplexity.ai`)
-* `PERPLEXITY_MODEL` - модель Perplexity (по умолчанию, `sonar`)
+Основные настройки задаются переменными окружения (см. `env.example`):
+
+**Telegram**
+* `TELEGRAM_BOT_TOKEN` — токен Telegram-бота.
+
+**ChromaDB**
+* `CHROMA_PERSIST_DIR` — каталог персистентного хранилища Chroma (по умолчанию `./chroma_store`).
+* `CHROMA_COLLECTION_EXHIBITS`, `CHROMA_COLLECTION_TITLE`, `CHROMA_COLLECTION_DESC`, `CHROMA_COLLECTION_FAQ` — имена коллекций.
+
+**vLLM (сервер инференса VLM)**
+* `VLLM_API_BASE_URL` — URL OpenAI-совместимого vLLM API.
+* `VLLM_VLM_MODEL` — идентификатор модели.
+* `VLLM_VLM_MAX_TOKENS`, `VLLM_VLM_TEMPERATURE` — параметры генерации.
+* `VLLM_API_KEY` — ключ доступа к API.
+* `VLLM_SYSTEM_PROMPT` — системный промпт.
+
+**Энкодеры**
+* `VISION_ENCODER_MODEL` — идентификатор визуального энкодера.
+* `TEXT_ENCODER_MODEL` — идентификатор текстового энкодера.
+
+**Пороги ранжирования**
+* `EXHIBIT_MATCH_THRESHOLD` — порог уверенного совпадения.
+* `FAQ_RELEVANCE_THRESHOLD` — порог, при котором ответ из FAQ возвращается без VLM-fallback.
+* `DISPLAY_SCORE_THRESHOLD` — минимальный score для показа результата пользователю.
+
+**Веб-поиск (обогащение ответов VLM)**
+* `WEB_SEARCH_ENABLED` — включение веб-поиска (`true`/`false`).
+* `WEB_SEARCH_MAX_RESULTS` — максимум сниппетов в контексте.
+
+**Perplexity (используется только скриптами расширения метаданных)**
+* `PERPLEXITY_API_KEY`, `PERPLEXITY_BASE_URL`, `PERPLEXITY_MODEL`.
+
+## Разработка
+
+Запуск тестов:
+
+```bash
+pytest
+```
+
+Проверка стиля и линтер:
+
+```bash
+ruff check .
+ruff format --check .
+```
