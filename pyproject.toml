@@ -42,6 +42,10 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "rouge-score>=0.1.2",
     "ddgs>=9.0.0",
+
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]
@@ -60,7 +64,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "agent*", "bot*", "config*", "database*", "models*", "services*"]
+include = ["core*", "agent*", "bot*", "config*", "database*", "db*", "models*", "services*"]
 exclude = ["tests*", "scripts*", "data*", "chroma_store*", "docs*", "deploy*"]
 
 # ---------------------------------------------------------------------------

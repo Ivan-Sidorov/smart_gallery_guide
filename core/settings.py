@@ -88,6 +88,17 @@ class Settings(BaseSettings):
         default=5, validation_alias="WEB_SEARCH_MAX_RESULTS"
     )
 
+    # ---------------------------------------------------------------------- PostgreSQL
+    database_url: str = Field(
+        default="postgresql+asyncpg://smart_guide:smart_guide@localhost:5432/smart_guide",
+        validation_alias="DATABASE_URL",
+    )
+    database_echo: bool = Field(default=False, validation_alias="DATABASE_ECHO")
+    database_pool_size: int = Field(default=10, validation_alias="DATABASE_POOL_SIZE")
+    database_max_overflow: int = Field(
+        default=20, validation_alias="DATABASE_MAX_OVERFLOW"
+    )
+
     # -------------------------------------------------------------------- Data paths
     @property
     def project_root(self) -> Path:

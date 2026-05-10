@@ -115,6 +115,30 @@ class VectorDatabase:
             self.desc_collection.add(**add_kw)
             self._invalidate_bm25(self.desc_collection)
 
+    def update_exhibit_metadata(
+        self,
+        exhibit_id: str,
+        metadata: ExhibitMetadata,
+    ) -> bool:
+        """Update only the metadata of an existing exhibit (no embedding change).
+
+        Used by the Postgres -> Chroma sync path: when an exhibit row in Postgres
+        is edited but the embedding is unchanged, we
+        only need to refresh metadata in the vector store.
+
+        Returns ``True`` if the exhibit was found and updated, ``False`` otherwise.
+        """
+        existing = self.exhibits_collection.get(ids=[exhibit_id])
+        if not existing["ids"]:
+            return False
+
+        serialized = self._serialize_metadata(metadata)
+        self.exhibits_collection.update(
+            ids=[exhibit_id],
+            metadatas=[serialized],
+        )
+        return True
+
     def add_faq(
         self,
         question: str,

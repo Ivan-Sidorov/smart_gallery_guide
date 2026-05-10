@@ -38,7 +38,7 @@ class BM25Index:
         doc_ids: list[str],
         documents: list[str],
         meta_map: dict[str, dict] | None = None,
-    ) -> BM25Index | None:
+    ) -> "BM25Index | None":
         """Build an index from raw documents. Returns ``None`` if nothing to index."""
         tokenized = [tokenize(doc or "") for doc in documents]
         if not any(tokenized):

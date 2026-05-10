@@ -12,6 +12,11 @@ from core.schemas import (
 )
 from core.search.web import WebSearchResult, WebSearchService
 from core.settings import Settings, get_settings
+from core.sync import (
+    exhibit_to_metadata,
+    sync_exhibit_to_chroma,
+    sync_pending_reindex,
+)
 from core.vector_db import VectorDatabase
 from core.vlm.client import VLM, SearchEvaluation
 
@@ -31,4 +36,7 @@ __all__ = [
     "FAQSearchResult",
     "Settings",
     "get_settings",
+    "exhibit_to_metadata",
+    "sync_exhibit_to_chroma",
+    "sync_pending_reindex",
 ]

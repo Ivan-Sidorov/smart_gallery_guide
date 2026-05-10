@@ -15,6 +15,11 @@ MODULES = [
     "agent.agent",
     "bot.handlers",
     "bot.bot",
+    "db",
+    "db.models",
+    "db.repositories",
+    "db.session",
+    "core.sync",
 ]
 
 
