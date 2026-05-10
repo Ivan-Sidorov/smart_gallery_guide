@@ -99,6 +99,19 @@ class Settings(BaseSettings):
         default=20, validation_alias="DATABASE_MAX_OVERFLOW"
     )
 
+    # ---------------------------------------------------------------------- FastAPI
+    api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")
+    api_port: int = Field(default=8080, validation_alias="API_PORT")
+    api_log_level: str = Field(default="info", validation_alias="API_LOG_LEVEL")
+    api_request_id_header: str = Field(
+        default="X-Request-Id", validation_alias="API_REQUEST_ID_HEADER"
+    )
+    # When True, lifespan loads TextEncoder + VectorDatabase
+    api_load_ml: bool = Field(default=True, validation_alias="API_LOAD_ML")
+    # Default top-K for search endpoints
+    api_default_top_k: int = Field(default=5, validation_alias="API_DEFAULT_TOP_K")
+    api_max_top_k: int = Field(default=20, validation_alias="API_MAX_TOP_K")
+
     # -------------------------------------------------------------------- Data paths
     @property
     def project_root(self) -> Path:

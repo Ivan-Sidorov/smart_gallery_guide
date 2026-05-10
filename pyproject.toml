@@ -46,6 +46,11 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
+
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "httpx>=0.27.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +58,8 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
+    "asgi-lifespan>=2.1.0",
+    "aiosqlite>=0.20.0",
 ]
 
 [project.scripts]
@@ -64,7 +71,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "agent*", "bot*", "config*", "database*", "db*", "models*", "services*"]
+include = ["core*", "agent*", "api*", "bot*", "config*", "database*", "db*", "models*", "services*"]
 exclude = ["tests*", "scripts*", "data*", "chroma_store*", "docs*", "deploy*"]
 
 # ---------------------------------------------------------------------------
