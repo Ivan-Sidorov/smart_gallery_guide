@@ -60,14 +60,14 @@ smart_gallery_guide/
 ### Переменные окружения
 На первом шаге необходимо задать переменные окружения. С полным списком можно ознакомиться в `env.example`.
 
-### Запуск vLLM сервера
+### Запуск vLLM сервера (локально)
 Перед использованием VLM в сервисе необходимо запустить vLLM сервер:
 
 ```bash
 ./scripts/start_vllm_server.sh
 ```
 
-### Запуск сервиса
+### Запуск сервиса локально
 Для локального запуска новой архитектуры нужны три процесса:
 
 ```bash
@@ -80,6 +80,38 @@ python3 -m workers.vlm_worker
 # 3) Telegram adapter
 python3 -m adapters.telegram.app
 ```
+
+### Запуск полного стека через Docker Compose
+
+Compose поднимает:
+- `postgres`
+- `api` (FastAPI + Chroma persistent volume)
+- `adapter-telegram`
+- `vlm-worker`
+- `vllm`
+- `nginx` (reverse proxy на API)
+
+Быстрый старт:
+
+```bash
+# заполнить env
+cp env.example .env
+
+# сборка и запуск
+docker compose -f deploy/docker-compose.yml up -d --build
+
+# опционально: второй воркер очереди
+docker compose -f deploy/docker-compose.yml up -d --scale vlm-worker=2
+```
+
+Проверка готовности:
+
+```bash
+curl http://localhost:8080/readyz
+curl http://localhost/healthz
+```
+
+`migrator` запускает `alembic upgrade head` автоматически перед стартом API.
 
 ## Детали
 
