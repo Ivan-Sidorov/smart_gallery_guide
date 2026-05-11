@@ -1,0 +1,298 @@
+"""Formatting helpers and Telegram I/O wrappers used by the adapter."""
+
+import asyncio
+import logging
+from pathlib import Path
+from typing import Any
+
+from telegram import Update
+from telegram.error import BadRequest, NetworkError, TimedOut
+from telegram.ext import ContextTypes
+
+from api.schemas.exhibits import ExhibitDTO, ExhibitSearchResultDTO
+from api.schemas.faq import FAQSearchResultDTO
+
+logger = logging.getLogger(__name__)
+
+
+async def download_photo_bytes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> bytes | None:
+    """Download the largest photo attachment as raw bytes."""
+    try:
+        if not update.message or not update.message.photo:
+            logger.warning("[utils] No photo in message")
+            return None
+
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        data = await file.download_as_bytearray()
+        logger.info(
+            "[utils] Downloaded photo: %s, size: %d bytes", photo.file_id, len(data)
+        )
+        return bytes(data)
+
+    except Exception:
+        logger.exception("[utils] Error downloading photo")
+        return None
+
+
+async def safe_edit_text(
+    text: str,
+    *,
+    callback_query: Any = None,
+    message: Any = None,
+    update: Update | None = None,
+    reply_markup: Any = None,
+    parse_mode: Any = None,
+) -> None:
+    """Safely edit a Telegram message, with fallback to sending a new message."""
+
+    def _fallback_message() -> Any:
+        if callback_query is not None and getattr(callback_query, "message", None):
+            return callback_query.message
+        if update is not None and getattr(update, "effective_message", None):
+            return update.effective_message
+        if message is not None:
+            return message
+        return None
+
+    for attempt in range(3):
+        try:
+            if callback_query is not None:
+                await callback_query.edit_message_text(
+                    text, reply_markup=reply_markup, parse_mode=parse_mode
+                )
+            elif message is not None:
+                await message.edit_text(
+                    text, reply_markup=reply_markup, parse_mode=parse_mode
+                )
+            else:
+                fallback_msg = _fallback_message()
+                if fallback_msg is not None:
+                    await safe_reply_text(
+                        fallback_msg,
+                        text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                elif callback_query is not None:
+                    await callback_query.answer()
+            return
+        except BadRequest as e:
+            err = str(e)
+            if "Message is not modified" in err:
+                if callback_query is not None:
+                    await callback_query.answer()
+                return
+            if "Message can't be edited" in err or "message to edit not found" in err:
+                fallback_msg = _fallback_message()
+                if fallback_msg is not None:
+                    await safe_reply_text(
+                        fallback_msg,
+                        text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                elif callback_query is not None:
+                    await callback_query.answer()
+                return
+            raise
+        except (TimedOut, NetworkError) as e:
+            if attempt < 2:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
+            logger.warning("[utils] Telegram API timeout while editing message: %s", e)
+            fallback_msg = _fallback_message()
+            if fallback_msg is not None:
+                await safe_reply_text(
+                    fallback_msg,
+                    text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+            return
+
+
+async def safe_reply_text(
+    message: Any,
+    text: str,
+    reply_markup: Any = None,
+    parse_mode: Any = None,
+) -> None:
+    """Send a message with retries on Telegram network timeouts."""
+    for attempt in range(3):
+        try:
+            await message.reply_text(
+                text, reply_markup=reply_markup, parse_mode=parse_mode
+            )
+            return
+        except (TimedOut, NetworkError) as e:
+            if attempt < 2:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
+            logger.warning("[utils] Telegram API timeout while sending message: %s", e)
+            return
+
+
+async def safe_reply_photo(
+    message: Any,
+    photo_path: str,
+    caption: str = "",
+    reply_markup: Any = None,
+    parse_mode: Any = None,
+) -> bool:
+    """Send a local photo file with retries on Telegram timeouts."""
+    path = Path(photo_path)
+    if not path.exists():
+        logger.warning("[utils] Exhibit image not found: %s", photo_path)
+        return False
+
+    for attempt in range(3):
+        try:
+            with path.open("rb") as f:
+                await message.reply_photo(
+                    photo=f,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+            return True
+        except (TimedOut, NetworkError) as e:
+            if attempt < 2:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
+            logger.warning("[utils] Telegram API timeout while sending photo: %s", e)
+            return False
+        except BadRequest as e:
+            logger.warning("[utils] Telegram API BadRequest while sending photo: %s", e)
+            return False
+        except Exception:
+            logger.exception("[utils] Unexpected error while sending photo")
+            return False
+
+
+def _extra(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Return the `extra` sub-dict from metadata or an empty dict."""
+    if not metadata:
+        return {}
+    extra = metadata.get("extra")
+    return dict(extra) if isinstance(extra, dict) else {}
+
+
+def format_exhibit_dto(exhibit: ExhibitDTO) -> str:
+    """Render an ExhibitDTO into a Markdown card."""
+    return _format_exhibit_card(
+        title=exhibit.title,
+        author=exhibit.author,
+        year=exhibit.year,
+        description=exhibit.description,
+        extra=dict(exhibit.extra or {}),
+    )
+
+
+def format_exhibit_search_result(result: ExhibitSearchResultDTO) -> str:
+    """Render a single search hit into Markdown."""
+    metadata = dict(result.metadata or {})
+    return _format_exhibit_card(
+        title=result.title,
+        author=metadata.get("author") or metadata.get("artist"),
+        year=metadata.get("year"),
+        description=metadata.get("description") or metadata.get("display_description"),
+        extra=_extra(metadata) or metadata,
+    )
+
+
+def _format_exhibit_card(
+    *,
+    title: str,
+    author: str | None,
+    year: str | None,
+    description: str | None,
+    extra: dict[str, Any],
+) -> str:
+    """Render an exhibit card into Markdown."""
+    lines = [f"*{title}*"]
+
+    if author:
+        lines.append(f"Автор: {author}")
+    if year:
+        lines.append(f"Год: {year}")
+
+    mat_parts: list[str] = []
+    if material := extra.get("material"):
+        mat_parts.append(str(material))
+    if techniq := extra.get("techniq"):
+        mat_parts.append(str(techniq))
+    if mat_parts:
+        lines.append(f"Материал/техника: {', '.join(mat_parts)}")
+
+    geo_parts: list[str] = []
+    if school := extra.get("school"):
+        geo_parts.append(str(school))
+    if place := extra.get("place"):
+        geo_parts.append(str(place))
+    if geo_parts:
+        lines.append(f"Происхождение: {', '.join(geo_parts)}")
+
+    if collection := extra.get("collection_name"):
+        lines.append(f"Коллекция: {collection}")
+
+    if description:
+        lines.append(f"\n{description}")
+
+    if anotation := extra.get("anotation"):
+        lines.append(f"\n*Экспертный комментарий:*\n{anotation}")
+
+    return "\n".join(lines)
+
+
+def format_exhibit_search_results(results: list[ExhibitSearchResultDTO]) -> str:
+    """Render a list of search hits as a numbered list."""
+    if not results:
+        return "Экспонаты не найдены."
+
+    if len(results) == 1:
+        return format_exhibit_search_result(results[0])
+
+    lines = [f"Найдено экспонатов: {len(results)}\n"]
+    for i, result in enumerate(results, 1):
+        score_percent = int(result.similarity_score * 100)
+        metadata = dict(result.metadata or {})
+        author = metadata.get("author") or metadata.get("artist")
+        line = f"{i}. *{result.title}*"
+        if author:
+            line += f" — {author}"
+        line += f" (совпадение: {score_percent}%)"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def format_faq_results(results: list[FAQSearchResultDTO]) -> str:
+    """Render FAQ hits as a Markdown list."""
+    if not results:
+        return "Похожие вопросы не найдены в базе часто задаваемых вопросов."
+
+    lines = ["*Похожие вопросы:*\n"]
+    for i, result in enumerate(results, 1):
+        lines.append(f"{i}. *Вопрос:* {result.question}")
+        lines.append(f"   *Ответ:* {result.answer}")
+        if i < len(results):
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_vlm_answer(answer: str | None) -> str:
+    """Render the VLM answer for display."""
+    if not answer:
+        return "Не удалось получить ответ."
+    return answer
+
+
+def truncate_text(text: str, max_length: int = 4096) -> str:
+    """Truncate text to Telegram's 4096 character limit."""
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."

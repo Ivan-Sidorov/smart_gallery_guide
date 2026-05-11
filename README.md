@@ -45,13 +45,12 @@ pip install -e ".[dev]"
 
 ```
 smart_gallery_guide/
-├── bot/              # Telegram бот (хэндлеры, клавиатуры)
-├── agent/            # Агент-оркестратор запросов
-├── models/           # ML-компоненты: text/vision энкодеры, VLM-клиент
-├── database/         # Обёртка над ChromaDB + гибридный поиск (BM25/RRF)
-├── services/         # Внешние сервисы (web-search)
+├── api/              # FastAPI backend (REST + orchestration)
+├── adapters/         # Мессенджер-адаптеры (сейчас Telegram)
+├── workers/          # Фоновые воркеры (VLM queue worker)
+├── core/             # ML-ядро: agent, encoders, vector DB, search
+├── db/               # SQLAlchemy модели, репозитории, миграции
 ├── scripts/          # Утилиты индексации и бенчмаркинга
-├── config/           # Конфигурация
 ├── tests/            # pytest smoke-тесты
 └── data/             # Данные экспонатов (изображения, метаданные, FAQ)
 ```
@@ -69,10 +68,17 @@ smart_gallery_guide/
 ```
 
 ### Запуск сервиса
-Далее необходимо запустить самого бота:
+Для локального запуска новой архитектуры нужны три процесса:
 
 ```bash
-python3 -m bot.bot
+# 1) API
+uvicorn api.main:app --host 0.0.0.0 --port 8080
+
+# 2) worker
+python3 -m workers.vlm_worker
+
+# 3) Telegram adapter
+python3 -m adapters.telegram.app
 ```
 
 ## Детали
@@ -116,6 +122,29 @@ python3 scripts/expand_metadata_perplexity.py --limit 500
 ```bash
 python3 scripts/merge_metadata_expand.py --limit 500
 ```
+
+### Загрузка в Postgres
+
+1. Загрузка экспонатов из `data/exhibits` + `data/metadata` в таблицу `exhibits`:
+
+```bash
+python3 scripts/load_exhibits.py
+```
+
+2. Загрузка FAQ из `data/faq` в таблицу `faq_items`:
+
+```bash
+python3 scripts/load_faq.py
+```
+
+3. Синхронизация Chroma из Postgres:
+
+```bash
+python3 scripts/reindex_chroma.py
+```
+
+Для измененных экспонатов `load_exhibits.py` выставляет `needs_reindex=true`, а `reindex_chroma.py` пересчитывает эмбеддинги и обновляет индексы Chroma.
+`load_faq.py` записывает FAQ в Postgres, после чего `reindex_chroma.py` переносит их в FAQ-индекс Chroma (по умолчанию для записей с `indexed_at IS NULL`).
 
 
 

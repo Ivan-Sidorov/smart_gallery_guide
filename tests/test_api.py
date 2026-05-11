@@ -1,4 +1,6 @@
-"""Smoke tests for the FastAPI backend without Postgres /Redis/Chroma."""
+"""Smoke tests for the FastAPI backend without Postgres/Redis/Chroma."""
+
+from __future__ import annotations
 
 import os
 import uuid

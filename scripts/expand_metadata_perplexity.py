@@ -188,7 +188,10 @@ def _call_perplexity(
             delay *= random.uniform(0.85, 1.15)
             time.sleep(delay)
 
-    assert last_err is not None
+    if last_err is None:
+        raise RuntimeError(
+            "[expand_metadata_perplexity] Perplexity call failed without captured exception"
+        )
     raise last_err
 
 
@@ -252,7 +255,6 @@ def main() -> None:
             continue
 
         try:
-            assert client is not None
             info = _call_perplexity(
                 client=client,
                 model=model,

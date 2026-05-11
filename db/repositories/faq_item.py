@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import FAQItem
@@ -45,3 +45,11 @@ class FAQItemRepository:
         self.session.add(item)
         await self.session.flush()
         return item
+
+    async def delete_for_exhibit(self, exhibit_id: str) -> int:
+        """Delete all FAQ items for an exhibit and return removed count."""
+        stmt = delete(FAQItem).where(FAQItem.exhibit_id == exhibit_id)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        rowcount = result.rowcount
+        return int(rowcount) if rowcount and rowcount > 0 else 0

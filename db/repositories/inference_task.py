@@ -1,10 +1,10 @@
 """Inference task repository."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import InferenceTask, TaskStatus, TaskType
@@ -99,3 +99,38 @@ class InferenceTaskRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def claim_pending(self, *, worker: str | None = None) -> InferenceTask | None:
+        """Atomically claim the oldest pending task."""
+        stmt = (
+            select(InferenceTask)
+            .where(InferenceTask.status == TaskStatus.PENDING)
+            .order_by(InferenceTask.queued_at.asc())
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        result = await self.session.execute(stmt)
+        task = result.scalars().first()
+        if task is None:
+            return None
+        task.status = TaskStatus.RUNNING
+        task.started_at = datetime.now(timezone.utc)
+        if worker is not None:
+            task.worker = worker
+        await self.session.flush()
+        return task
+
+    async def requeue_stale_running(self, *, older_than: timedelta) -> int:
+        """Reset `running` tasks that are older than `older_than`."""
+        cutoff = datetime.now(timezone.utc) - older_than
+        stmt = (
+            update(InferenceTask)
+            .where(
+                InferenceTask.status == TaskStatus.RUNNING,
+                InferenceTask.started_at.is_not(None),
+                InferenceTask.started_at < cutoff,
+            )
+            .values(status=TaskStatus.PENDING, started_at=None, worker=None)
+        )
+        result = await self.session.execute(stmt)
+        return int(result.rowcount or 0)

@@ -1,5 +1,0 @@
-"""Legacy import path for the ``models.vlm`` module."""
-
-from core.vlm.client import VLM, SearchEvaluation
-
-__all__ = ["VLM", "SearchEvaluation"]

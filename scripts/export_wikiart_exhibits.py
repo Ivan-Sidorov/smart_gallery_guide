@@ -1,7 +1,6 @@
 import argparse
 import json
 import re
-import sys
 import uuid
 from collections import Counter
 from pathlib import Path
@@ -9,6 +8,8 @@ from typing import Any
 
 from datasets import load_dataset
 from PIL import Image
+
+from core.settings import get_settings
 
 EXCLUDED_GENRES = {
     "religious painting",
@@ -217,10 +218,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    project_root = Path(__file__).parent.parent
-    sys.path.insert(0, str(project_root))
-
-    from config.config import EXHIBITS_DIR, METADATA_DIR
+    settings = get_settings()
 
     saved, artist_counts, genre_counts, style_counts = export_wikiart_exhibits(
         count=args.count,
@@ -228,8 +226,8 @@ def main() -> None:
         max_per_artist=args.max_per_artist,
         max_per_genre=args.max_per_genre,
         max_per_style=args.max_per_style,
-        exhibits_dir=EXHIBITS_DIR,
-        metadata_dir=METADATA_DIR,
+        exhibits_dir=settings.exhibits_dir,
+        metadata_dir=settings.metadata_dir,
     )
 
     print("\n[done]")

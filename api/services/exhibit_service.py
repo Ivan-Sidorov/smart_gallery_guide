@@ -74,7 +74,7 @@ class ExhibitService:
         """
         if self._vector_db is None or self._text_encoder is None:
             logger.warning(
-                "[ExhibitService] search_by_text called but ML components are not loaded"
+                "[exhibit_service] search_by_text called but ML components are not loaded"
             )
             return []
 
@@ -123,7 +123,7 @@ class ExhibitService:
         """Recognise an exhibit from a user photo."""
         if self._vector_db is None or self._vision_encoder is None:
             logger.warning(
-                "[ExhibitService] recognize_by_image called but ML components are not loaded"
+                "[exhibit_service] recognize_by_image called but ML components are not loaded"
             )
             return []
 
@@ -140,7 +140,7 @@ class ExhibitService:
         try:
             image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         except Exception as exc:
-            logger.warning("recognize_by_image: cannot decode image: %s", exc)
+            logger.warning("[exhibit_service] can't decode image: %s", exc)
             return []
 
         embedding = await asyncio.to_thread(self._vision_encoder.encode_image, image)

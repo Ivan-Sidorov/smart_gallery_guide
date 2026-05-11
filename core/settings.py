@@ -99,6 +99,22 @@ class Settings(BaseSettings):
         default=20, validation_alias="DATABASE_MAX_OVERFLOW"
     )
 
+    # ---------------------------------------------------------------------- VLM worker
+    # How often the worker polls inference_tasks when the queue is empty
+    worker_poll_interval_s: float = Field(
+        default=1.0, validation_alias="WORKER_POLL_INTERVAL_S"
+    )
+    # Max number of VLM tasks one worker processes concurrently
+    worker_concurrency: int = Field(default=2, validation_alias="WORKER_CONCURRENCY")
+    # Running tasks older than this are considered stuck and re-queued.
+    worker_stale_timeout_s: int = Field(
+        default=300, validation_alias="WORKER_STALE_TIMEOUT_S"
+    )
+    # How often the recovery sweep runs.
+    worker_stale_check_interval_s: int = Field(
+        default=60, validation_alias="WORKER_STALE_CHECK_INTERVAL_S"
+    )
+
     # ---------------------------------------------------------------------- FastAPI
     api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")
     api_port: int = Field(default=8080, validation_alias="API_PORT")
@@ -111,6 +127,38 @@ class Settings(BaseSettings):
     # Default top-K for search endpoints
     api_default_top_k: int = Field(default=5, validation_alias="API_DEFAULT_TOP_K")
     api_max_top_k: int = Field(default=20, validation_alias="API_MAX_TOP_K")
+
+    # ---------------------------------------------------------------- Telegram adapter
+    # Base URL of the FastAPI backend the Telegram adapter calls over HTTP
+    adapter_backend_url: str = Field(
+        default="http://localhost:8080", validation_alias="ADAPTER_BACKEND_URL"
+    )
+    # HTTP timeout (seconds) for adapter -> API calls
+    adapter_http_timeout_s: float = Field(
+        default=30.0, validation_alias="ADAPTER_HTTP_TIMEOUT_S"
+    )
+    # Initial delay between polling /v1/tasks/{id}
+    adapter_task_poll_initial_s: float = Field(
+        default=0.5, validation_alias="ADAPTER_TASK_POLL_INITIAL_S"
+    )
+    # Maximum delay between polls
+    adapter_task_poll_max_s: float = Field(
+        default=3.0, validation_alias="ADAPTER_TASK_POLL_MAX_S"
+    )
+    # Multiplier applied to the polling delay after each empty/pending poll
+    adapter_task_poll_factor: float = Field(
+        default=1.5, validation_alias="ADAPTER_TASK_POLL_FACTOR"
+    )
+    # Total time for waiting on a single VLM task before cancelling
+    adapter_task_poll_timeout_s: float = Field(
+        default=120.0, validation_alias="ADAPTER_TASK_POLL_TIMEOUT_S"
+    )
+    # Header the adapter uses to propagate request-id to the API
+    adapter_request_id_header: str = Field(
+        default="X-Request-Id", validation_alias="ADAPTER_REQUEST_ID_HEADER"
+    )
+    # Logging level for the adapter process
+    adapter_log_level: str = Field(default="info", validation_alias="ADAPTER_LOG_LEVEL")
 
     # -------------------------------------------------------------------- Data paths
     @property

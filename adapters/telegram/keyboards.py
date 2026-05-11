@@ -1,12 +1,12 @@
+"""Inline/reply keyboards for the Telegram adapter."""
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
-from database.schemas import ExhibitSearchResult
+from api.schemas.exhibits import ExhibitSearchResultDTO
 
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
-    """
-    Get main menu keyboard.
-    """
+    """Main reply keyboard shown under the input field."""
     keyboard = [
         ["Поиск экспонатов"],
         ["Помощь"],
@@ -19,11 +19,9 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_exhibits_list_keyboard(
-    exhibits: list[ExhibitSearchResult],
+    exhibits: list[ExhibitSearchResultDTO],
 ) -> InlineKeyboardMarkup:
-    """
-    Get keyboard for selecting an exhibit from search results.
-    """
+    """Inline keyboard with buttons for selecting an exhibit from search results."""
     keyboard = []
     for i, exhibit in enumerate(exhibits, 1):
         title = exhibit.title
@@ -42,19 +40,19 @@ def get_exhibits_list_keyboard(
 
 
 def get_back_to_exhibit_keyboard(exhibit_id: str) -> InlineKeyboardMarkup:
-    """
-    Get keyboard with back button to return to exhibit view.
-    """
+    """Single 'back to exhibit card' button."""
     keyboard = [
-        [InlineKeyboardButton("Назад к экспонату", callback_data=f"exhibit_info:{exhibit_id}")]
+        [
+            InlineKeyboardButton(
+                "Назад к экспонату", callback_data=f"exhibit_info:{exhibit_id}"
+            )
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def get_cancel_keyboard() -> ReplyKeyboardMarkup:
-    """
-    Get keyboard with cancel button.
-    """
+    """Reply keyboard with a single 'Cancel' button."""
     keyboard = [["Отмена"]]
     return ReplyKeyboardMarkup(
         keyboard=keyboard,

@@ -54,7 +54,10 @@ class SessionService:
             merged = {**(active.context or {}), **context}
             await session_repo.update_context(active.id, merged)
             active = await session_repo.get(active.id)
-            assert active is not None
+            if active is None:
+                raise RuntimeError(
+                    "Failed to reload active session after context update"
+                )
         await self._session.commit()
         return _session_to_dto(active)
 

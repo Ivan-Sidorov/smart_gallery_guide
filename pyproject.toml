@@ -63,7 +63,9 @@ dev = [
 ]
 
 [project.scripts]
-smart-guide-bot = "bot.bot:main"
+smart-guide-bot = "adapters.telegram.app:main"
+smart-guide-adapter = "adapters.telegram.app:main"
+smart-guide-worker = "workers.vlm_worker:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -71,7 +73,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "agent*", "api*", "bot*", "config*", "database*", "db*", "models*", "services*"]
+include = ["core*", "api*", "adapters*", "db*", "workers*"]
 exclude = ["tests*", "scripts*", "data*", "chroma_store*", "docs*", "deploy*"]
 
 # ---------------------------------------------------------------------------
