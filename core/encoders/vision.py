@@ -17,6 +17,49 @@ class VisionEncoder:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.processor = AutoProcessor.from_pretrained(self.model_name)
         self.model = AutoModel.from_pretrained(self.model_name).to(self.device)
+        self.model.eval()
+
+    @staticmethod
+    def _ensure_tensor(features: object) -> torch.Tensor:
+        """Convert encoder output to a 2D tensor [batch, dim]."""
+        if isinstance(features, torch.Tensor):
+            tensor = features
+        else:
+            tensor = None
+            for key in (
+                "pooler_output",
+                "image_embeds",
+                "text_embeds",
+                "last_hidden_state",
+            ):
+                value = getattr(features, key, None)
+                if isinstance(value, torch.Tensor):
+                    tensor = value
+                    break
+            if tensor is None and isinstance(features, dict):
+                for key in (
+                    "pooler_output",
+                    "image_embeds",
+                    "text_embeds",
+                    "last_hidden_state",
+                ):
+                    value = features.get(key)
+                    if isinstance(value, torch.Tensor):
+                        tensor = value
+                        break
+            if tensor is None:
+                raise TypeError(
+                    f"Unsupported encoder output type: {type(features).__name__}"
+                )
+
+        if tensor.ndim == 1:
+            return tensor.unsqueeze(0)
+        if tensor.ndim == 3:
+            # Typical transformer output: [batch, seq, hidden]
+            return tensor.mean(dim=1)
+        if tensor.ndim != 2:
+            raise TypeError(f"Unsupported embedding shape: {tuple(tensor.shape)}")
+        return tensor
 
     @staticmethod
     def _to_pil(image: Image.Image | str | np.ndarray) -> Image.Image:
@@ -39,7 +82,8 @@ class VisionEncoder:
         inputs = self.processor(images=pil_image, return_tensors="pt").to(self.device)
         with torch.no_grad():
             features = self.model.get_image_features(**inputs)
-        return features.cpu().numpy()[0]
+            features = self._ensure_tensor(features)
+        return features.detach().cpu().numpy()[0]
 
     def encode_images_batch(
         self, images: list[Image.Image | str | np.ndarray]
@@ -58,7 +102,8 @@ class VisionEncoder:
         ).to(self.device)
         with torch.no_grad():
             features = self.model.get_image_features(**inputs)
-        return features.cpu().numpy()
+            features = self._ensure_tensor(features)
+        return features.detach().cpu().numpy()
 
     def encode_text(self, text: str) -> np.ndarray:
         """Encode a single string into a 1D embedding.
@@ -74,7 +119,8 @@ class VisionEncoder:
         ).to(self.device)
         with torch.no_grad():
             features = self.model.get_text_features(**inputs)
-        return features.cpu().numpy()[0]
+            features = self._ensure_tensor(features)
+        return features.detach().cpu().numpy()[0]
 
     def encode_texts_batch(self, texts: list[str]) -> np.ndarray:
         """Encode multiple strings into embeddings.
@@ -90,7 +136,8 @@ class VisionEncoder:
         ).to(self.device)
         with torch.no_grad():
             features = self.model.get_text_features(**inputs)
-        return features.cpu().numpy()
+            features = self._ensure_tensor(features)
+        return features.detach().cpu().numpy()
 
     def close(self) -> None:
         """Release GPU memory held by the underlying model."""

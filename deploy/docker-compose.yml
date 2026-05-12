@@ -2,12 +2,18 @@ name: smart-gallery-guide
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE:-postgres:16-bookworm}
+    runtime: ${POSTGRES_RUNTIME:-runc}
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - huge_pages=off
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-smart_guide}
       POSTGRES_USER: ${POSTGRES_USER:-smart_guide}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smart_guide}
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---set=huge_pages=off}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -33,21 +39,19 @@ services:
     environment:
       HF_HOME: /root/.cache/huggingface
     volumes:
-      - hf_cache:/root/.cache/huggingface
+      - hf_cache_vllm:/root/.cache/huggingface
     ports:
       - "${VLLM_PORT:-8000}:8000"
     healthcheck:
       test:
         [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=2)",
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=10).read(1)\"",
         ]
-      interval: 20s
-      timeout: 5s
-      retries: 10
-      start_period: 90s
+      interval: 15s
+      timeout: 15s
+      retries: 40
+      start_period: 900s
 
   migrator:
     build:
@@ -78,6 +82,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-smart_guide}:${POSTGRES_PASSWORD:-smart_guide}@postgres:5432/${POSTGRES_DB:-smart_guide}
       CHROMA_PERSIST_DIR: /app/chroma_store
+      HF_HOME: /home/appuser/.cache/huggingface
       API_HOST: 0.0.0.0
       API_PORT: "8080"
       API_LOAD_ML: "${API_LOAD_ML:-true}"
@@ -92,14 +97,13 @@ services:
     volumes:
       - chroma_data:/app/chroma_store
       - exhibits_data:/app/data/exhibits
-      - hf_cache:/home/appuser/.cache/huggingface
+      - hf_cache_app:/home/appuser/.cache/huggingface
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz > /dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 40s
-    init: true
     stop_grace_period: 45s
 
   adapter-telegram:
@@ -108,11 +112,12 @@ services:
       dockerfile: deploy/Dockerfile
       target: adapter-telegram
     restart: unless-stopped
+    env_file:
+      - ../.env
     depends_on:
       api:
         condition: service_healthy
     environment:
-      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       ADAPTER_BACKEND_URL: http://api:8080
       ADAPTER_LOG_LEVEL: "${ADAPTER_LOG_LEVEL:-info}"
       ADAPTER_HTTP_TIMEOUT_S: "${ADAPTER_HTTP_TIMEOUT_S:-30.0}"
@@ -120,7 +125,6 @@ services:
       ADAPTER_TASK_POLL_MAX_S: "${ADAPTER_TASK_POLL_MAX_S:-3.0}"
       ADAPTER_TASK_POLL_FACTOR: "${ADAPTER_TASK_POLL_FACTOR:-1.5}"
       ADAPTER_TASK_POLL_TIMEOUT_S: "${ADAPTER_TASK_POLL_TIMEOUT_S:-120.0}"
-    init: true
     stop_grace_period: 20s
 
   vlm-worker:
@@ -138,6 +142,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-smart_guide}:${POSTGRES_PASSWORD:-smart_guide}@postgres:5432/${POSTGRES_DB:-smart_guide}
+      HF_HOME: /home/appuser/.cache/huggingface
       VLLM_API_BASE_URL: http://vllm:8000/v1
       VLLM_VLM_MODEL: "${VLLM_VLM_MODEL:-Qwen/Qwen3-VL-8B-Instruct}"
       VLLM_API_KEY: "${VLLM_API_KEY:-}"
@@ -150,7 +155,7 @@ services:
       WORKER_LOG_LEVEL: "${WORKER_LOG_LEVEL:-info}"
     volumes:
       - exhibits_data:/app/data/exhibits:ro
-    init: true
+      - hf_cache_app:/home/appuser/.cache/huggingface
     stop_grace_period: 45s
 
   nginx:
@@ -164,7 +169,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 6
@@ -173,4 +178,5 @@ volumes:
   pgdata:
   chroma_data:
   exhibits_data:
-  hf_cache:
+  hf_cache_vllm:
+  hf_cache_app:

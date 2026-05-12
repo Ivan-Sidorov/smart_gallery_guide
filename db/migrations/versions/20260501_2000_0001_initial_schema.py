@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=128), nullable=False),
         sa.Column("title", sa.String(length=512), nullable=False),
         sa.Column("author", sa.String(length=256)),
-        sa.Column("year", sa.String(length=64)),
+        sa.Column("year", sa.Text()),
         sa.Column("description", sa.Text()),
         sa.Column("image_path", sa.String(length=1024)),
         sa.Column(

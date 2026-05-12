@@ -54,6 +54,7 @@ COPY db /app/db
 COPY workers /app/workers
 
 RUN mkdir -p /app/chroma_store /app/data/exhibits \
+    /home/appuser/.cache/huggingface/hub \
     && chown -R appuser:appuser /app /home/appuser
 
 USER appuser

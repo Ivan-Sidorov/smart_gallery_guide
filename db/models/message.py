@@ -37,6 +37,11 @@ class MessageType(str, enum.Enum):
     SYSTEM = "system"
 
 
+def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
+    """Return enum values for SQLAlchemy native enums."""
+    return [member.value for member in enum_cls]
+
+
 class Message(Base):
     """A single message exchanged with the user."""
 
@@ -54,11 +59,11 @@ class Message(Base):
         nullable=False,
     )
     direction: Mapped[MessageDirection] = mapped_column(
-        Enum(MessageDirection, name="message_direction"),
+        Enum(MessageDirection, name="message_direction", values_callable=_enum_values),
         nullable=False,
     )
     type: Mapped[MessageType] = mapped_column(
-        Enum(MessageType, name="message_type"),
+        Enum(MessageType, name="message_type", values_callable=_enum_values),
         nullable=False,
     )
     content: Mapped[str | None] = mapped_column(Text)

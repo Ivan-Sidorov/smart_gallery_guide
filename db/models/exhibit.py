@@ -18,7 +18,7 @@ class Exhibit(Base):
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     author: Mapped[str | None] = mapped_column(String(256))
-    year: Mapped[str | None] = mapped_column(String(64))
+    year: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     image_path: Mapped[str | None] = mapped_column(String(1024))
     extra: Mapped[dict[str, Any]] = mapped_column(

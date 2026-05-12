@@ -26,6 +26,7 @@ dependencies = [
     "torch>=2.2.2",
     "transformers>=4.51.0",
     "sentence-transformers>=4.0.0",
+    "sentencepiece>=0.2.0",
     "Pillow>=11.2.1",
 
     "openai>=1.70.0",

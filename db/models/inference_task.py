@@ -41,6 +41,11 @@ class TaskStatus(str, enum.Enum):
     ERROR = "error"
 
 
+def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
+    """Return enum values for SQLAlchemy native enums."""
+    return [member.value for member in enum_cls]
+
+
 class InferenceTask(Base):
     """Queued/processed ML inference task."""
 
@@ -50,10 +55,10 @@ class InferenceTask(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     type: Mapped[TaskType] = mapped_column(
-        Enum(TaskType, name="task_type"), nullable=False
+        Enum(TaskType, name="task_type", values_callable=_enum_values), nullable=False
     )
     status: Mapped[TaskStatus] = mapped_column(
-        Enum(TaskStatus, name="task_status"),
+        Enum(TaskStatus, name="task_status", values_callable=_enum_values),
         nullable=False,
         default=TaskStatus.PENDING,
         server_default=TaskStatus.PENDING.value,
