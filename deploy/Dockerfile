@@ -39,7 +39,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl libgomp1 tini \
+    && apt-get install -y --no-install-recommends curl ffmpeg libgomp1 tini \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 appuser
 

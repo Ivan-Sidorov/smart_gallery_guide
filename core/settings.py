@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     text_encoder_model: str = Field(
         default="deepvk/USER-bge-m3", validation_alias="TEXT_ENCODER_MODEL"
     )
+    asr_encoder_model: str = Field(
+        default="openai/whisper-small", validation_alias="ASR_ENCODER_MODEL"
+    )
+    asr_encoder_language: str = Field(
+        default="russian", validation_alias="ASR_ENCODER_LANGUAGE"
+    )
 
     # -------------------------------------------------------------- Retrieval thresholds
     exhibit_match_threshold: float = Field(

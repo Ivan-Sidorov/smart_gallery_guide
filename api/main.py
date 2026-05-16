@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from sqlalchemy import text
 
 from api.logging import bind_request_id, configure_logging, reset_request_id
-from api.routers import exhibits, faq, health, qa, sessions, tasks
+from api.routers import asr, exhibits, faq, health, qa, sessions, tasks
 from core.settings import Settings, get_settings
 from db.session import get_engine
 
@@ -28,9 +28,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.text_encoder = None
     app.state.vision_encoder = None
+    app.state.asr_encoder = None
     app.state.vector_db = None
 
     if settings.api_load_ml:
+        from core.encoders.asr import ASREncoder
         from core.encoders.text import TextEncoder
         from core.encoders.vision import VisionEncoder
         from core.vector_db import VectorDatabase
@@ -43,6 +45,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "[API lifespan] loading VisionEncoder (%s)", settings.vision_encoder_model
         )
         app.state.vision_encoder = VisionEncoder()
+        logger.info(
+            "[API lifespan] loading ASREncoder (%s)", settings.asr_encoder_model
+        )
+        app.state.asr_encoder = ASREncoder()
         logger.info(
             "[API lifespan] opening VectorDatabase at %s", settings.chroma_persist_dir
         )
@@ -67,7 +73,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         logger.info("[API lifespan] shutting down")
-        for attr_name in ("text_encoder", "vision_encoder"):
+        for attr_name in ("text_encoder", "vision_encoder", "asr_encoder"):
             component = getattr(app.state, attr_name, None)
             if component is None:
                 continue
@@ -89,7 +95,8 @@ def create_app() -> FastAPI:
         version="0.2.0",
         description=(
             "HTTP backend for the Smart Gallery Guide. Owns text retrieval "
-            "(bge-m3 + Chroma + BM25), image-based exhibit recognition (SigLIP), "
+            "(bge-m3 + Chroma + BM25), speech-to-text (Whisper ASR), "
+            "image-based exhibit recognition (SigLIP), "
             "exhibit metadata, sessions and the inference-task ledger. Heavy "
             "VLM Q&A is delegated to a background worker."
         ),
@@ -142,6 +149,7 @@ def create_app() -> FastAPI:
         return response
 
     app.include_router(health.router)
+    app.include_router(asr.router)
     app.include_router(exhibits.router)
     app.include_router(faq.router)
     app.include_router(qa.router)

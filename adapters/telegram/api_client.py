@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from api.schemas.asr import TranscribeResponse
 from api.schemas.exhibits import ExhibitDTO, ExhibitSearchResultDTO
 from api.schemas.faq import FAQSearchResultDTO
 from api.schemas.qa import QAResponse
@@ -158,6 +159,23 @@ class APIClient:
         )
         self._raise_for_status(response)
         return [ExhibitSearchResultDTO.model_validate(item) for item in response.json()]
+
+    async def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        *,
+        filename: str = "voice.ogg",
+        content_type: str = "audio/ogg",
+    ) -> TranscribeResponse:
+        """Transcribe a voice or audio attachment to plain text."""
+        files = {"audio": (filename, audio_bytes, content_type)}
+        response = await self._client.post(
+            "/v1/asr/transcribe",
+            files=files,
+            headers=self._headers(),
+        )
+        self._raise_for_status(response)
+        return TranscribeResponse.model_validate(response.json())
 
     async def recognize_exhibit(
         self,

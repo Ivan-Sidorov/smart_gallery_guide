@@ -86,6 +86,8 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: "8080"
       API_LOAD_ML: "${API_LOAD_ML:-true}"
+      ASR_ENCODER_MODEL: "${ASR_ENCODER_MODEL:-openai/whisper-small}"
+      ASR_ENCODER_LANGUAGE: "${ASR_ENCODER_LANGUAGE:-russian}"
       API_LOG_LEVEL: "${API_LOG_LEVEL:-info}"
       VLLM_API_BASE_URL: http://vllm:8000/v1
       VLLM_VLM_MODEL: "${VLLM_VLM_MODEL:-Qwen/Qwen3-VL-8B-Instruct}"

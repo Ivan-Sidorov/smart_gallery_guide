@@ -48,12 +48,16 @@ async def readiness(
         components["vision_encoder"] = (
             "ok" if getattr(request.app.state, "vision_encoder", None) else "down"
         )
+        components["asr_encoder"] = (
+            "ok" if getattr(request.app.state, "asr_encoder", None) else "down"
+        )
         components["chroma"] = (
             "ok" if getattr(request.app.state, "vector_db", None) else "down"
         )
     else:
         components["text_encoder"] = "disabled"
         components["vision_encoder"] = "disabled"
+        components["asr_encoder"] = "disabled"
         components["chroma"] = "disabled"
 
     vllm_url = _vllm_models_url(settings.vllm_api_base_url)

@@ -6,12 +6,14 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.services import (
+    ASRService,
     ExhibitService,
     FAQService,
     QAService,
     SessionService,
     TaskService,
 )
+from core.encoders.asr import ASREncoder
 from core.encoders.text import TextEncoder
 from core.encoders.vision import VisionEncoder
 from core.settings import Settings, get_settings
@@ -45,6 +47,11 @@ def get_vision_encoder(request: Request) -> VisionEncoder | None:
     return getattr(request.app.state, "vision_encoder", None)
 
 
+def get_asr_encoder(request: Request) -> ASREncoder | None:
+    """Return the lifespan-loaded ``ASREncoder``, or ``None`` if disabled."""
+    return getattr(request.app.state, "asr_encoder", None)
+
+
 def get_vector_db(request: Request) -> VectorDatabase | None:
     """Return the lifespan-loaded ``VectorDatabase``, or ``None`` if disabled."""
     return getattr(request.app.state, "vector_db", None)
@@ -65,6 +72,14 @@ def get_exhibit_service(
         vision_encoder=vision_encoder,
         settings=settings,
     )
+
+
+def get_asr_service(
+    asr_encoder: ASREncoder | None = Depends(get_asr_encoder),
+    settings: Settings = Depends(get_app_settings),
+) -> ASRService:
+    """Construct ``ASRService`` for this request."""
+    return ASRService(asr_encoder=asr_encoder, settings=settings)
 
 
 def get_faq_service(

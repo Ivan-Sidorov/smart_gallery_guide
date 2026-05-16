@@ -15,6 +15,46 @@ from api.schemas.faq import FAQSearchResultDTO
 logger = logging.getLogger(__name__)
 
 
+async def download_audio_bytes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> tuple[bytes, str, str] | None:
+    """Download a voice message or audio attachment.
+
+    Returns:
+        Tuple of (raw bytes, filename, MIME type), or ``None`` on failure.
+    """
+    try:
+        message = update.message
+        if message is None:
+            logger.warning("[utils] No message in update")
+            return None
+
+        if message.voice is not None:
+            attachment = message.voice
+            filename = "voice.ogg"
+            content_type = "audio/ogg"
+        elif message.audio is not None:
+            attachment = message.audio
+            filename = attachment.file_name or "audio.mp3"
+            content_type = attachment.mime_type or "audio/mpeg"
+        else:
+            logger.warning("[utils] No voice/audio in message")
+            return None
+
+        file = await context.bot.get_file(attachment.file_id)
+        data = await file.download_as_bytearray()
+        logger.info(
+            "[utils] Downloaded audio: %s, size: %d bytes",
+            attachment.file_id,
+            len(data),
+        )
+        return bytes(data), filename, content_type
+
+    except Exception:
+        logger.exception("[utils] Error downloading audio")
+        return None
+
+
 async def download_photo_bytes(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> bytes | None:

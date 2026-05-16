@@ -1,7 +1,5 @@
 """Tanslates Telegram updates into API calls and renders the responses back to the chat."""
 
-from __future__ import annotations
-
 import logging
 import uuid
 from typing import Any
@@ -23,6 +21,7 @@ from adapters.telegram.keyboards import (
     get_main_keyboard,
 )
 from adapters.telegram.utils import (
+    download_audio_bytes,
     download_photo_bytes,
     format_exhibit_dto,
     format_exhibit_search_result,
@@ -166,9 +165,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Я помогу вам узнать больше об экспонатах и ответить на ваши вопросы.\n\n"
         "Что я умею:\n"
         "• Распознавать экспонаты по фотографии\n"
-        "• Искать экспонаты по текстовому запросу\n"
+        "• Искать экспонаты по текстовому или голосовому запросу\n"
         "• Отвечать на вопросы об экспонатах\n"
-        "Отправьте фото экспоната или используйте кнопки меню."
+        "Отправьте фото экспоната, текст, голосовое сообщение "
+        "или используйте кнопки меню."
     )
 
     if update.message is not None:
@@ -201,8 +201,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*Как использовать бота:*\n\n"
         "1. *Распознавание экспоната:*\n"
         "   Отправьте фотографию экспоната, и я найду его в базе.\n\n"
-        "2. *Поиск по тексту:*\n"
-        "   Напишите название или описание экспоната для поиска.\n\n"
+        "2. *Поиск по тексту или голосу:*\n"
+        "   Напишите или продиктуйте название или описание экспоната.\n\n"
         "3. *Вопросы об экспонате:*\n"
         "   После распознавания экспоната вы можете задать вопрос, "
         "просто отправив сообщение с вопросом.\n\n"
@@ -320,12 +320,92 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 
+async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle voice/audio: transcribe via ASR, then reuse the text pipeline."""
+    await _bind_request_id(update)
+    if not update.message:
+        return
+
+    processing_msg = await update.message.reply_text(
+        "Распознаю речь...",
+        reply_markup=get_main_keyboard(),
+    )
+
+    try:
+        downloaded = await download_audio_bytes(update, context)
+        if not downloaded:
+            await safe_edit_text(
+                "Не удалось загрузить аудио.",
+                update=update,
+                message=processing_msg,
+            )
+            return
+
+        audio_bytes, filename, content_type = downloaded
+        api = _api(context)
+        try:
+            result = await api.transcribe_audio(
+                audio_bytes,
+                filename=filename,
+                content_type=content_type,
+            )
+        except APIClientError as exc:
+            logger.error("[telegram:handlers] transcribe_audio API error: %s", exc)
+            await safe_edit_text(
+                "Сервер сейчас не отвечает. Попробуйте позже.",
+                update=update,
+                message=processing_msg,
+            )
+            return
+
+        text = result.text.strip()
+        if not text:
+            await safe_edit_text(
+                "Не удалось распознать речь. Попробуйте ещё раз.",
+                update=update,
+                message=processing_msg,
+            )
+            return
+
+        await safe_edit_text(
+            f"Распознано: _{truncate_text(text, max_length=500)}_",
+            update=update,
+            message=processing_msg,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await _handle_user_text(update, context, text)
+
+    except (TimedOut, NetworkError) as exc:
+        logger.warning("[telegram:handlers] voice_handler network error: %s", exc)
+        await safe_edit_text(
+            "Произошла сетевая ошибка. Попробуйте ещё раз.",
+            update=update,
+            message=processing_msg,
+        )
+    except Exception:
+        logger.exception("[telegram:handlers] voice_handler unexpected error")
+        await safe_edit_text(
+            "Произошла ошибка при обработке аудио. Попробуйте ещё раз.",
+            update=update,
+            message=processing_msg,
+        )
+
+
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle a text message: menu commands, search mode, or question to VLM."""
     await _bind_request_id(update)
     if not update.message or not update.message.text:
         return
     text = update.message.text.strip()
+    await _handle_user_text(update, context, text)
+
+
+async def _handle_user_text(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
+) -> None:
+    """Route recognised or typed user text through search / Q&A flows."""
+    if not update.message:
+        return
 
     session = await _ensure_session(update, context)
     ctx_data: dict[str, Any] = {}

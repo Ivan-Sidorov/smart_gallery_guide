@@ -22,6 +22,7 @@ from adapters.telegram.handlers import (
     photo_handler,
     start_command,
     text_handler,
+    voice_handler,
 )
 from adapters.telegram.settings import AdapterSettings, load_adapter_settings
 
@@ -83,6 +84,9 @@ def build_application(settings: AdapterSettings) -> Application:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    application.add_handler(
+        MessageHandler(filters.VOICE | filters.AUDIO, voice_handler)
+    )
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler)
     )

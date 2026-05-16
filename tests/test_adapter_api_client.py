@@ -74,6 +74,23 @@ async def test_get_exhibit_404_returns_none() -> None:
     assert result is None
 
 
+async def test_transcribe_audio_sends_multipart() -> None:
+    """Voice bytes go to /v1/asr/transcribe as multipart."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["content_type"] = request.headers.get("content-type", "")
+        return httpx.Response(200, json={"text": "привет"})
+
+    async with _build_client(handler) as client:
+        result = await client.transcribe_audio(b"\x00\x01", filename="voice.ogg")
+
+    assert captured["url"] == "http://api.test/v1/asr/transcribe"
+    assert "multipart/form-data" in str(captured["content_type"])
+    assert result.text == "привет"
+
+
 async def test_recognize_exhibit_sends_multipart() -> None:
     """Photo bytes go to /v1/exhibits/recognize as multipart."""
     captured: dict[str, object] = {}

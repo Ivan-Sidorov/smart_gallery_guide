@@ -1,7 +1,5 @@
 """Smoke tests for the FastAPI backend without Postgres/Redis/Chroma."""
 
-from __future__ import annotations
-
 import os
 import uuid
 from datetime import datetime, timezone
@@ -25,6 +23,7 @@ from asgi_lifespan import LifespanManager  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 from api.deps import (  # noqa: E402
+    get_asr_service,
     get_db_session,
     get_exhibit_service,
     get_faq_service,
@@ -94,6 +93,21 @@ class _FakeExhibitService:
                 metadata={"exhibit_id": dto.exhibit_id, "title": dto.title},
             )
         ]
+
+
+class _FakeASRService:
+    def __init__(self, *, text: str = "распознанный текст", available: bool = True):
+        self.text = text
+        self.available = available
+
+    @property
+    def is_available(self) -> bool:
+        return self.available
+
+    async def transcribe(self, audio_bytes: bytes) -> str:
+        if not audio_bytes:
+            return ""
+        return self.text
 
 
 class _FakeFAQService:
@@ -216,12 +230,14 @@ class _FakeSessionService:
 def fake_services():
     """Build a fresh fake-service for each test."""
     exhibits = _FakeExhibitService()
+    asr = _FakeASRService()
     faq = _FakeFAQService()
     tasks = _FakeTaskService()
     qa = _FakeQAService(faq=faq, tasks=tasks)
     sessions = _FakeSessionService()
     return {
         "exhibits": exhibits,
+        "asr": asr,
         "faq": faq,
         "tasks": tasks,
         "qa": qa,
@@ -239,6 +255,7 @@ async def client(fake_services):
 
     app.dependency_overrides[get_db_session] = _no_db
     app.dependency_overrides[get_exhibit_service] = lambda: fake_services["exhibits"]
+    app.dependency_overrides[get_asr_service] = lambda: fake_services["asr"]
     app.dependency_overrides[get_faq_service] = lambda: fake_services["faq"]
     app.dependency_overrides[get_task_service] = lambda: fake_services["tasks"]
     app.dependency_overrides[get_qa_service] = lambda: fake_services["qa"]
@@ -326,6 +343,26 @@ async def test_recognize_exhibit_ok(client):
     assert len(items) == 1
     assert items[0]["exhibit_id"] == "ex-1"
     assert items[0]["similarity_score"] == pytest.approx(0.84)
+
+
+async def test_transcribe_audio_ok(client):
+    """ASR endpoint returns recognised text."""
+    response = await client.post(
+        "/v1/asr/transcribe",
+        files={"audio": ("voice.ogg", b"fake-audio", "audio/ogg")},
+    )
+    assert response.status_code == 200
+    assert response.json()["text"] == "распознанный текст"
+
+
+async def test_transcribe_audio_unavailable(client, fake_services):
+    """503 when ASR model is not loaded."""
+    fake_services["asr"] = _FakeASRService(available=False)
+    response = await client.post(
+        "/v1/asr/transcribe",
+        files={"audio": ("voice.ogg", b"fake-audio", "audio/ogg")},
+    )
+    assert response.status_code == 503
 
 
 async def test_recognize_exhibit_no_image(client):
