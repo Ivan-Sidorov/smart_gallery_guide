@@ -10,6 +10,7 @@ from PIL import Image
 
 from core.settings import get_settings
 from core.vlm.prompts import base_system_prompt, search_evaluation_system_prompt
+from core.vlm.response import strip_vlm_reasoning
 
 
 @dataclass
@@ -105,9 +106,9 @@ class VLM:
 
             if response.choices and len(response.choices) > 0:
                 answer = response.choices[0].message.content
-                return (
-                    answer.strip() if answer else "Не удалось получить ответ от модели."
-                )
+                if not answer:
+                    return "Не удалось получить ответ от модели."
+                return strip_vlm_reasoning(answer)
             return "Не удалось получить ответ от модели."
         except Exception as e:
             return f"Ошибка при обращении к VLM API: {str(e)}"
@@ -167,7 +168,7 @@ class VLM:
 
             raw = ""
             if response.choices and len(response.choices) > 0:
-                raw = (response.choices[0].message.content or "").strip()
+                raw = strip_vlm_reasoning(response.choices[0].message.content or "")
             return self._parse_search_evaluation(raw)
         except Exception as e:
             return SearchEvaluation(
@@ -187,10 +188,11 @@ class VLM:
         answer_match = re.match(r"(?i)^ANSWER:\s*(.+)", raw, re.DOTALL)
         if answer_match:
             return SearchEvaluation(
-                needs_search=False, answer=answer_match.group(1).strip()
+                needs_search=False,
+                answer=strip_vlm_reasoning(answer_match.group(1)),
             )
 
-        return SearchEvaluation(needs_search=False, answer=raw)
+        return SearchEvaluation(needs_search=False, answer=strip_vlm_reasoning(raw))
 
     async def close(self) -> None:
         await self.client.close()

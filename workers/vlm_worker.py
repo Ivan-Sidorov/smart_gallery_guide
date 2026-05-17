@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.search.web import WebSearchService
 from core.settings import Settings, get_settings
 from core.vlm.client import VLM
+from core.vlm.context import build_exhibit_context_from_exhibit
 from core.vlm.prompts import enriched_system_prompt
 from db.models import TaskType
 from db.repositories import ExhibitRepository, InferenceTaskRepository
@@ -29,33 +30,6 @@ logger = logging.getLogger(__name__)
 def _worker_id() -> str:
     """Stable identifier written to `inference_tasks.worker`."""
     return f"vlm-worker@{socket.gethostname()}:{os.getpid()}"
-
-
-def _build_exhibit_context(exhibit: Any) -> str:
-    """Render exhibit row into a context block for the VLM."""
-    parts = [f"Название: {exhibit.title}"]
-    if exhibit.author:
-        parts.append(f"Автор: {exhibit.author}")
-    if exhibit.year:
-        parts.append(f"Год: {exhibit.year}")
-
-    extra = dict(exhibit.extra or {})
-    for key, label in (
-        ("material", "Материал"),
-        ("school", "Школа/страна"),
-        ("techniq", "Техника"),
-        ("place", "Место"),
-        ("epoque", "Эпоха"),
-    ):
-        value = extra.get(key)
-        if value:
-            parts.append(f"{label}: {value}")
-
-    if exhibit.description:
-        parts.append(f"Описание: {exhibit.description}")
-    if anotation := extra.get("anotation"):
-        parts.append(f"Экспертный комментарий: {anotation}")
-    return "\n".join(parts)
 
 
 def _decode_image(image_b64: str) -> Image.Image:
@@ -103,7 +77,7 @@ async def _resolve_qa_inputs(
                 exhibit_id,
             )
         else:
-            context = _build_exhibit_context(exhibit)
+            context = build_exhibit_context_from_exhibit(exhibit)
             if image is None:
                 image = _load_exhibit_image(exhibit.image_path, settings)
 

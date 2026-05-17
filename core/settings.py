@@ -49,7 +49,7 @@ class Settings(BaseSettings):
         default="Qwen/Qwen3-VL-8B-Instruct", validation_alias="VLLM_VLM_MODEL"
     )
     vllm_vlm_max_tokens: int = Field(
-        default=500, validation_alias="VLLM_VLM_MAX_TOKENS"
+        default=6144, validation_alias="VLLM_VLM_MAX_TOKENS"
     )
     vllm_vlm_temperature: float = Field(
         default=0.7, validation_alias="VLLM_VLM_TEMPERATURE"
