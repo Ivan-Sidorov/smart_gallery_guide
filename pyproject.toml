@@ -63,6 +63,8 @@ dev = [
     "ruff>=0.6.0",
     "asgi-lifespan>=2.1.0",
     "aiosqlite>=0.20.0",
+    "jiwer>=3.0.0",
+    "tqdm>=4.66.0",
 ]
 
 [project.scripts]

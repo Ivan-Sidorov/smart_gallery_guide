@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from transformers import pipeline
 
+from core.device import resolve_pipeline_device
 from core.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ class ASREncoder:
         self.language = (
             language if language is not None else settings.asr_encoder_language
         )
-        self.device: int | str = 0 if torch.cuda.is_available() else -1
+        self.device: int | str = resolve_pipeline_device(None)
         pipeline_kwargs: dict[str, Any] = {
             "task": "automatic-speech-recognition",
             "model": self.model_name,
