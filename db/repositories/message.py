@@ -42,6 +42,12 @@ class MessageRepository:
         await self.session.flush()
         return message
 
+    async def get_by_id(self, message_id: int) -> Message | None:
+        """Fetch a message by primary key."""
+        stmt = select(Message).where(Message.id == message_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_for_session(
         self, session_id: uuid.UUID, limit: int = 100, offset: int = 0
     ) -> list[Message]:

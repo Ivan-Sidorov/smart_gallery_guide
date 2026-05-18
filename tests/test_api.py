@@ -27,12 +27,18 @@ from api.deps import (  # noqa: E402
     get_db_session,
     get_exhibit_service,
     get_faq_service,
+    get_feedback_service,
     get_message_service,
     get_qa_service,
     get_session_service,
     get_task_service,
 )
-from api.schemas.messages import MessageCreateRequest, MessageDTO  # noqa: E402
+from api.schemas.feedback import FeedbackCreateRequest, FeedbackDTO  # noqa: E402
+from api.schemas.messages import (  # noqa: E402
+    BotReplyCreateRequest,
+    MessageCreateRequest,
+    MessageDTO,
+)
 from api.main import create_app  # noqa: E402
 from api.schemas.exhibits import ExhibitDTO, ExhibitSearchResultDTO  # noqa: E402
 from api.schemas.faq import FAQSearchResultDTO  # noqa: E402
@@ -217,6 +223,84 @@ class _FakeMessageService:
         self._next_id += 1
         return dto
 
+    async def create_bot_reply(self, payload: BotReplyCreateRequest) -> MessageDTO:
+        session = await self._sessions.get(payload.session_id)
+        if session is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.user_id != payload.user_id:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=403, detail="Session does not belong to this user"
+            )
+        attachments: dict = {}
+        if payload.exhibit_id:
+            attachments["exhibit_id"] = payload.exhibit_id
+        dto = MessageDTO(
+            id=self._next_id,
+            session_id=payload.session_id,
+            user_id=payload.user_id,
+            direction="out",
+            type="text",
+            content=payload.content,
+            attachments=attachments,
+            created_at=datetime.now(timezone.utc),
+        )
+        self._next_id += 1
+        self._by_id = getattr(self, "_by_id", {})
+        self._by_id[dto.id] = dto
+        return dto
+
+    def get_stored(self, message_id: int) -> MessageDTO | None:
+        return getattr(self, "_by_id", {}).get(message_id)
+
+
+class _FakeFeedbackService:
+    def __init__(self, messages: _FakeMessageService) -> None:
+        self._messages = messages
+        self._rows: dict[int, FeedbackDTO] = {}
+
+    async def submit(self, payload: FeedbackCreateRequest) -> FeedbackDTO:
+        message = self._messages.get_stored(payload.message_id)
+        if message is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Message not found")
+        if message.user_id != payload.user_id:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=403, detail="Message does not belong to this user"
+            )
+        if message.direction != "out":
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=422,
+                detail="Feedback is only allowed on bot replies",
+            )
+        existing = self._rows.get(payload.message_id)
+        if existing is not None:
+            updated = existing.model_copy(
+                update={
+                    "rating": payload.rating,
+                    "comment": payload.comment or existing.comment,
+                }
+            )
+            self._rows[payload.message_id] = updated
+            return updated
+        dto = FeedbackDTO(
+            id=uuid.uuid4(),
+            message_id=payload.message_id,
+            rating=payload.rating,
+            comment=payload.comment,
+            created_at=datetime.now(timezone.utc),
+        )
+        self._rows[payload.message_id] = dto
+        return dto
+
 
 class _FakeSessionService:
     def __init__(self) -> None:
@@ -272,6 +356,7 @@ def fake_services():
     qa = _FakeQAService(faq=faq, tasks=tasks)
     sessions = _FakeSessionService()
     messages = _FakeMessageService(sessions)
+    feedback = _FakeFeedbackService(messages)
     return {
         "exhibits": exhibits,
         "asr": asr,
@@ -280,6 +365,7 @@ def fake_services():
         "qa": qa,
         "sessions": sessions,
         "messages": messages,
+        "feedback": feedback,
     }
 
 
@@ -299,6 +385,7 @@ async def client(fake_services):
     app.dependency_overrides[get_qa_service] = lambda: fake_services["qa"]
     app.dependency_overrides[get_session_service] = lambda: fake_services["sessions"]
     app.dependency_overrides[get_message_service] = lambda: fake_services["messages"]
+    app.dependency_overrides[get_feedback_service] = lambda: fake_services["feedback"]
 
     async with LifespanManager(app):
         async with AsyncClient(
@@ -603,6 +690,69 @@ async def test_log_exhibit_event_wrong_user(client):
         },
     )
     assert response.status_code == 403
+
+
+async def test_log_bot_reply_and_feedback(client):
+    """Bot replies are logged as OUT messages and accept like/dislike."""
+    session = await client.post("/v1/sessions", json={"user_id": 42})
+    sid = session.json()["id"]
+
+    reply = await client.post(
+        "/v1/messages/bot-reply",
+        json={
+            "session_id": sid,
+            "user_id": 42,
+            "content": "Ответ бота",
+            "exhibit_id": "ex-1",
+        },
+    )
+    assert reply.status_code == 201
+    message_id = reply.json()["id"]
+    assert reply.json()["direction"] == "out"
+
+    like = await client.post(
+        "/v1/feedback",
+        json={"message_id": message_id, "user_id": 42, "rating": 1},
+    )
+    assert like.status_code == 201
+    assert like.json()["rating"] == 1
+
+    dislike = await client.post(
+        "/v1/feedback",
+        json={
+            "message_id": message_id,
+            "user_id": 42,
+            "rating": -1,
+            "comment": "неточно",
+        },
+    )
+    assert dislike.status_code == 201
+    assert dislike.json()["rating"] == -1
+    assert dislike.json()["comment"] == "неточно"
+
+
+async def test_feedback_rejects_inbound_message(client):
+    """Feedback is only allowed on outbound bot replies."""
+    session = await client.post("/v1/sessions", json={"user_id": 1})
+    sid = session.json()["id"]
+
+    inbound = await client.post(
+        "/v1/messages",
+        json={
+            "session_id": sid,
+            "user_id": 1,
+            "exhibit_id": "ex-1",
+            "event": "question",
+            "content": "Кто автор?",
+        },
+    )
+    message_id = inbound.json()["id"]
+
+    response = await client.post(
+        "/v1/feedback",
+        json={"message_id": message_id, "user_id": 1, "rating": 1},
+    )
+    assert response.status_code == 422
 
 
 async def test_search_exhibits_with_user_context(client):

@@ -3,7 +3,11 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.schemas.messages import MessageCreateRequest, MessageDTO
+from api.schemas.messages import (
+    BotReplyCreateRequest,
+    MessageCreateRequest,
+    MessageDTO,
+)
 from db.models import MessageDirection, MessageType
 from db.repositories import MessageRepository, SessionRepository
 
@@ -58,6 +62,35 @@ class MessageService:
                 "exhibit_id": payload.exhibit_id,
                 "event": payload.event,
             },
+        )
+        await self._session.commit()
+        await self._session.refresh(message)
+        return _to_dto(message)
+
+    async def create_bot_reply(self, payload: BotReplyCreateRequest) -> MessageDTO:
+        """Record an outbound bot answer that can receive feedback."""
+        session_repo = SessionRepository(self._session)
+        row = await session_repo.get(payload.session_id)
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Session not found")
+        if row.user_id != payload.user_id:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail="Session does not belong to this user",
+            )
+
+        attachments: dict = {}
+        if payload.exhibit_id:
+            attachments["exhibit_id"] = payload.exhibit_id
+
+        message = await MessageRepository(self._session).add(
+            session_id=payload.session_id,
+            user_id=payload.user_id,
+            direction=MessageDirection.OUT,
+            type=MessageType.TEXT,
+            content=payload.content.strip(),
+            attachments=attachments,
+            api_task_id=payload.api_task_id,
         )
         await self._session.commit()
         await self._session.refresh(message)

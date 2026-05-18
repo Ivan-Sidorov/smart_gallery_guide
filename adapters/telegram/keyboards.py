@@ -39,6 +39,40 @@ def get_exhibits_list_keyboard(
     return InlineKeyboardMarkup(keyboard)
 
 
+def get_answer_keyboard(
+    message_id: int | None,
+    exhibit_id: str | None = None,
+    *,
+    rated: bool = False,
+) -> InlineKeyboardMarkup | None:
+    """Inline keyboard with like/dislike and optional back-to-exhibit button."""
+    if message_id is None and exhibit_id is None:
+        return None
+
+    keyboard: list[list[InlineKeyboardButton]] = []
+    if message_id is not None:
+        if rated:
+            keyboard.append(
+                [InlineKeyboardButton("Спасибо за оценку!", callback_data="noop")]
+            )
+        else:
+            keyboard.append(
+                [
+                    InlineKeyboardButton("👍", callback_data=f"fb:{message_id}:1"),
+                    InlineKeyboardButton("👎", callback_data=f"fb:{message_id}:-1"),
+                ]
+            )
+    if exhibit_id:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    "Назад к экспонату", callback_data=f"exhibit_info:{exhibit_id}"
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(keyboard) if keyboard else None
+
+
 def get_back_to_exhibit_keyboard(exhibit_id: str) -> InlineKeyboardMarkup:
     """Single 'back to exhibit card' button."""
     keyboard = [

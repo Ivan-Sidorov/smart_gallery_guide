@@ -16,6 +16,7 @@ from adapters.telegram.api_client import (
     current_request_id,
 )
 from adapters.telegram.keyboards import (
+    get_answer_keyboard,
     get_back_to_exhibit_keyboard,
     get_exhibits_list_keyboard,
     get_main_keyboard,
@@ -47,6 +48,7 @@ SESSION_CONTEXT_KEY = "session_context"
 CURRENT_EXHIBIT_KEY = "current_exhibit_id"
 WAITING_FOR_QUESTION_KEY = "waiting_for_question"
 SEARCH_MODE_KEY = "search_mode"
+PENDING_FEEDBACK_MESSAGE_KEY = "pending_feedback_message_id"
 
 
 def _api(context: ContextTypes.DEFAULT_TYPE) -> APIClient:
@@ -155,6 +157,65 @@ async def _log_exhibit_event(
         )
     except APIClientError as exc:
         logger.warning("[telegram:handlers] log exhibit event failed: %s", exc)
+
+
+async def _log_bot_reply(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    session: tuple[uuid.UUID, dict[str, Any]] | None,
+    *,
+    content: str,
+    exhibit_id: str | None = None,
+    api_task_id: uuid.UUID | None = None,
+) -> int | None:
+    """Persist a bot answer and return its message id."""
+    if session is None:
+        return None
+    user_id = _user_id(update)
+    if user_id is None:
+        return None
+    sid, _ = session
+    api = _api(context)
+    try:
+        message = await api.log_bot_reply(
+            session_id=sid,
+            user_id=user_id,
+            content=content,
+            exhibit_id=exhibit_id,
+            api_task_id=api_task_id,
+        )
+    except APIClientError as exc:
+        logger.warning("[telegram:handlers] log bot reply failed: %s", exc)
+        return None
+    return message.id
+
+
+async def _render_bot_answer(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    processing_msg: Any,
+    answer: str,
+    *,
+    session: tuple[uuid.UUID, dict[str, Any]] | None,
+    exhibit_id: str | None = None,
+    api_task_id: uuid.UUID | None = None,
+) -> None:
+    """Show a bot answer with optional feedback buttons."""
+    text = truncate_text(format_vlm_answer(answer))
+    message_id = await _log_bot_reply(
+        update,
+        context,
+        session,
+        content=text,
+        exhibit_id=exhibit_id,
+        api_task_id=api_task_id,
+    )
+    await safe_edit_text(
+        text,
+        update=update,
+        message=processing_msg,
+        reply_markup=get_answer_keyboard(message_id, exhibit_id),
+    )
 
 
 async def _send_exhibit_card(
@@ -451,13 +512,38 @@ async def _handle_user_text(
     if session is not None:
         sid, ctx_data = session
 
+    pending_feedback_id = ctx_data.get(PENDING_FEEDBACK_MESSAGE_KEY)
+    if pending_feedback_id is not None and sid is not None:
+        user_id = _user_id(update)
+        if user_id is not None:
+            api = _api(context)
+            try:
+                await api.submit_feedback(
+                    message_id=int(pending_feedback_id),
+                    user_id=user_id,
+                    rating=-1,
+                    comment=text,
+                )
+            except APIClientError as exc:
+                logger.warning("[telegram:handlers] feedback comment failed: %s", exc)
+            else:
+                await update.message.reply_text("Спасибо за комментарий!")
+        await _update_session_context(
+            context, sid, ctx_data, {PENDING_FEEDBACK_MESSAGE_KEY: None}
+        )
+        return
+
     if text == "Поиск экспонатов":
         if sid is not None:
             await _update_session_context(
                 context,
                 sid,
                 ctx_data,
-                {SEARCH_MODE_KEY: True, WAITING_FOR_QUESTION_KEY: None},
+                {
+                    SEARCH_MODE_KEY: True,
+                    WAITING_FOR_QUESTION_KEY: None,
+                    PENDING_FEEDBACK_MESSAGE_KEY: None,
+                },
             )
         await update.message.reply_text(
             "Отправьте новое фото экспоната или напишите название/описание для "
@@ -476,7 +562,11 @@ async def _handle_user_text(
                 context,
                 sid,
                 ctx_data,
-                {SEARCH_MODE_KEY: None, WAITING_FOR_QUESTION_KEY: None},
+                {
+                    SEARCH_MODE_KEY: None,
+                    WAITING_FOR_QUESTION_KEY: None,
+                    PENDING_FEEDBACK_MESSAGE_KEY: None,
+                },
             )
         await update.message.reply_text("Отменено.", reply_markup=get_main_keyboard())
         return
@@ -635,11 +725,13 @@ async def _do_exhibit_question(
             await _update_session_context(
                 context, sid, ctx_data, {WAITING_FOR_QUESTION_KEY: None}
             )
-        await safe_edit_text(
-            truncate_text(format_vlm_answer(response.answer)),
-            update=update,
-            message=processing_msg,
-            reply_markup=get_back_to_exhibit_keyboard(exhibit_id),
+        await _render_bot_answer(
+            update,
+            context,
+            processing_msg,
+            response.answer,
+            session=session,
+            exhibit_id=exhibit_id,
         )
         return
 
@@ -652,7 +744,12 @@ async def _do_exhibit_question(
         return
 
     await _wait_and_render_task(
-        update, context, processing_msg, response.task_id, exhibit_id=exhibit_id
+        update,
+        context,
+        processing_msg,
+        response.task_id,
+        exhibit_id=exhibit_id,
+        session=session,
     )
 
     if session is not None:
@@ -669,6 +766,7 @@ async def _wait_and_render_task(
     task_id: uuid.UUID,
     *,
     exhibit_id: str | None = None,
+    session: tuple[uuid.UUID, dict[str, Any]] | None = None,
 ) -> None:
     """Poll the task to completion and render the result back to chat."""
     api = _api(context)
@@ -714,11 +812,24 @@ async def _wait_and_render_task(
     answer = ""
     if isinstance(task.result, dict):
         answer = str(task.result.get("answer") or "").strip()
-    await safe_edit_text(
-        truncate_text(format_vlm_answer(answer)),
-        update=update,
-        message=processing_msg,
-        reply_markup=(get_back_to_exhibit_keyboard(exhibit_id) if exhibit_id else None),
+    if not answer:
+        await safe_edit_text(
+            "Не удалось получить ответ. Попробуйте ещё раз.",
+            update=update,
+            message=processing_msg,
+            reply_markup=(
+                get_back_to_exhibit_keyboard(exhibit_id) if exhibit_id else None
+            ),
+        )
+        return
+    await _render_bot_answer(
+        update,
+        context,
+        processing_msg,
+        answer,
+        session=session,
+        exhibit_id=exhibit_id,
+        api_task_id=task_id,
     )
 
 
@@ -729,26 +840,35 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     query = update.callback_query
-    await query.answer()
-
     callback_data = query.data
     if not callback_data:
+        await query.answer()
         return
 
-    try:
-        action, exhibit_id = callback_data.split(":", 1)
-    except ValueError:
+    if callback_data == "noop":
+        await query.answer()
         return
 
+    parts = callback_data.split(":")
+    if len(parts) < 2:
+        await query.answer()
+        return
+
+    action = parts[0]
+    if action != "fb":
+        await query.answer()
+
     try:
-        if action == "select_exhibit":
-            await _handle_exhibit_selection(update, context, exhibit_id)
+        if action == "fb":
+            await _handle_feedback(update, context, parts[1:])
+        elif action == "select_exhibit":
+            await _handle_exhibit_selection(update, context, parts[1])
         elif action == "exhibit_info":
-            await _handle_exhibit_info(update, context, exhibit_id)
+            await _handle_exhibit_info(update, context, parts[1])
         elif action == "ask_question":
-            await _handle_ask_question(update, context, exhibit_id)
+            await _handle_ask_question(update, context, parts[1])
         elif action == "search_faq":
-            await _handle_search_faq(update, context, exhibit_id)
+            await _handle_search_faq(update, context, parts[1])
     except Exception:
         logger.exception("[handlers] callback_handler unexpected error")
         try:
@@ -794,6 +914,61 @@ async def _render_exhibit(
         "Экспонат не найден.",
         reply_markup=get_main_keyboard(),
     )
+
+
+async def _handle_feedback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    payload: list[str],
+) -> None:
+    """Handle like/dislike on a bot reply."""
+    callback_query = update.callback_query
+    if callback_query is None or len(payload) < 2:
+        return
+
+    try:
+        message_id = int(payload[0])
+        rating = int(payload[1])
+    except ValueError:
+        return
+    if rating not in (1, -1):
+        return
+
+    user_id = _user_id(update)
+    if user_id is None:
+        return
+
+    api = _api(context)
+    try:
+        await api.submit_feedback(message_id=message_id, user_id=user_id, rating=rating)
+    except APIClientError as exc:
+        logger.warning("[telegram:handlers] submit_feedback failed: %s", exc)
+        await callback_query.answer("Не удалось сохранить оценку.", show_alert=True)
+        return
+
+    exhibit_id: str | None = None
+    session = await _ensure_session(update, context)
+    if session is not None:
+        _, ctx_data = session
+        exhibit_id = ctx_data.get(CURRENT_EXHIBIT_KEY)
+        if rating == -1:
+            sid, ctx = session
+            await _update_session_context(
+                context,
+                sid,
+                ctx,
+                {PENDING_FEEDBACK_MESSAGE_KEY: message_id},
+            )
+
+    label = "Спасибо!" if rating == 1 else "Принято. Можете написать комментарий."
+    await callback_query.answer(label)
+
+    if callback_query.message:
+        await safe_edit_text(
+            callback_query.message.text or "",
+            callback_query=callback_query,
+            reply_markup=get_answer_keyboard(message_id, exhibit_id, rated=True),
+        )
 
 
 async def _handle_exhibit_selection(

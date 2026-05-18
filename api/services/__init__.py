@@ -3,6 +3,7 @@
 from api.services.asr_service import ASRService
 from api.services.exhibit_service import ExhibitService
 from api.services.faq_service import FAQService
+from api.services.feedback_service import FeedbackService
 from api.services.message_service import MessageService
 from api.services.qa_service import QAService
 from api.services.session_service import SessionService
@@ -12,6 +13,7 @@ __all__ = [
     "ASRService",
     "ExhibitService",
     "FAQService",
+    "FeedbackService",
     "MessageService",
     "QAService",
     "SessionService",

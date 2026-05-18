@@ -9,6 +9,7 @@ from api.services import (
     ASRService,
     ExhibitService,
     FAQService,
+    FeedbackService,
     MessageService,
     QAService,
     SessionService,
@@ -123,3 +124,10 @@ def get_message_service(
 ) -> MessageService:
     """Construct `MessageService` for this request."""
     return MessageService(session=session)
+
+
+def get_feedback_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> FeedbackService:
+    """Construct `FeedbackService` for this request."""
+    return FeedbackService(session=session)

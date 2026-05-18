@@ -23,6 +23,16 @@ class MessageCreateRequest(BaseModel):
     )
 
 
+class BotReplyCreateRequest(BaseModel):
+    """Persist an outbound bot reply for feedback attribution."""
+
+    session_id: uuid.UUID
+    user_id: int = Field(description="Telegram user id.")
+    content: str = Field(min_length=1, max_length=8000)
+    exhibit_id: str | None = Field(default=None, max_length=128)
+    api_task_id: uuid.UUID | None = None
+
+
 class MessageDTO(BaseModel):
     """Persisted message row."""
 

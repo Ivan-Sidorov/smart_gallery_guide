@@ -13,7 +13,8 @@ import httpx
 from api.schemas.asr import TranscribeResponse
 from api.schemas.exhibits import ExhibitDTO, ExhibitSearchResultDTO
 from api.schemas.faq import FAQSearchResultDTO
-from api.schemas.messages import MessageDTO
+from api.schemas.feedback import FeedbackDTO
+from api.schemas.messages import BotReplyCreateRequest, MessageDTO
 from api.schemas.qa import QAResponse
 from api.schemas.sessions import SessionDTO
 from api.schemas.tasks import TaskDTO
@@ -255,6 +256,53 @@ class APIClient:
         )
         self._raise_for_status(response)
         return MessageDTO.model_validate(response.json())
+
+    async def log_bot_reply(
+        self,
+        *,
+        session_id: uuid.UUID,
+        user_id: int,
+        content: str,
+        exhibit_id: str | None = None,
+        api_task_id: uuid.UUID | None = None,
+    ) -> MessageDTO:
+        """Persist an outbound bot answer."""
+        payload = BotReplyCreateRequest(
+            session_id=session_id,
+            user_id=user_id,
+            content=content,
+            exhibit_id=exhibit_id,
+            api_task_id=api_task_id,
+        )
+        response = await self._client.post(
+            "/v1/messages/bot-reply",
+            json=payload.model_dump(mode="json"),
+            headers=self._headers(),
+        )
+        self._raise_for_status(response)
+        return MessageDTO.model_validate(response.json())
+
+    async def submit_feedback(
+        self,
+        *,
+        message_id: int,
+        user_id: int,
+        rating: int,
+        comment: str | None = None,
+    ) -> FeedbackDTO:
+        """Submit like/dislike for a bot reply."""
+        payload: dict[str, Any] = {
+            "message_id": message_id,
+            "user_id": user_id,
+            "rating": rating,
+        }
+        if comment is not None:
+            payload["comment"] = comment
+        response = await self._client.post(
+            "/v1/feedback", json=payload, headers=self._headers()
+        )
+        self._raise_for_status(response)
+        return FeedbackDTO.model_validate(response.json())
 
     async def qa_exhibit(
         self,
