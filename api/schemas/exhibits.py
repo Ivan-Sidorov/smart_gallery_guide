@@ -1,5 +1,6 @@
 """Exhibit search request/response DTOs."""
 
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -31,6 +32,12 @@ class ExhibitSearchRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description="Minimum cosine score (falls back to settings.exhibit_match_threshold).",
+    )
+    user_id: int | None = Field(
+        default=None, description="Telegram user id (for analytics attribution)."
+    )
+    session_id: uuid.UUID | None = Field(
+        default=None, description="Active dialogue session id."
     )
 
 

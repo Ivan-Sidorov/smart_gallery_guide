@@ -13,6 +13,7 @@ import httpx
 from api.schemas.asr import TranscribeResponse
 from api.schemas.exhibits import ExhibitDTO, ExhibitSearchResultDTO
 from api.schemas.faq import FAQSearchResultDTO
+from api.schemas.messages import MessageDTO
 from api.schemas.qa import QAResponse
 from api.schemas.sessions import SessionDTO
 from api.schemas.tasks import TaskDTO
@@ -148,12 +149,21 @@ class APIClient:
         return ExhibitDTO.model_validate(response.json())
 
     async def search_exhibits(
-        self, query: str, top_k: int | None = None
+        self,
+        query: str,
+        top_k: int | None = None,
+        *,
+        user_id: int | None = None,
+        session_id: uuid.UUID | None = None,
     ) -> list[ExhibitSearchResultDTO]:
         """Hybrid text search."""
         payload: dict[str, Any] = {"query": query}
         if top_k is not None:
             payload["top_k"] = top_k
+        if user_id is not None:
+            payload["user_id"] = user_id
+        if session_id is not None:
+            payload["session_id"] = str(session_id)
         response = await self._client.post(
             "/v1/exhibits/search", json=payload, headers=self._headers()
         )
@@ -184,12 +194,18 @@ class APIClient:
         filename: str = "photo.jpg",
         content_type: str = "image/jpeg",
         top_k: int | None = None,
+        user_id: int | None = None,
+        session_id: uuid.UUID | None = None,
     ) -> list[ExhibitSearchResultDTO]:
         """Recognise an exhibit from a user photo."""
         files = {"image": (filename, image_bytes, content_type)}
         data: dict[str, Any] = {}
         if top_k is not None:
             data["top_k"] = str(top_k)
+        if user_id is not None:
+            data["user_id"] = str(user_id)
+        if session_id is not None:
+            data["session_id"] = str(session_id)
         response = await self._client.post(
             "/v1/exhibits/recognize",
             files=files,
@@ -215,6 +231,30 @@ class APIClient:
         )
         self._raise_for_status(response)
         return [FAQSearchResultDTO.model_validate(item) for item in response.json()]
+
+    async def log_exhibit_event(
+        self,
+        *,
+        session_id: uuid.UUID,
+        user_id: int,
+        exhibit_id: str,
+        event: str,
+        content: str | None = None,
+    ) -> MessageDTO:
+        """Persist a user–exhibit interaction (select or question)."""
+        payload: dict[str, Any] = {
+            "session_id": str(session_id),
+            "user_id": user_id,
+            "exhibit_id": exhibit_id,
+            "event": event,
+        }
+        if content is not None:
+            payload["content"] = content
+        response = await self._client.post(
+            "/v1/messages", json=payload, headers=self._headers()
+        )
+        self._raise_for_status(response)
+        return MessageDTO.model_validate(response.json())
 
     async def qa_exhibit(
         self,

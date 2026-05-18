@@ -9,6 +9,7 @@ from api.services import (
     ASRService,
     ExhibitService,
     FAQService,
+    MessageService,
     QAService,
     SessionService,
     TaskService,
@@ -115,3 +116,10 @@ def get_session_service(
 ) -> SessionService:
     """Construct ``SessionService`` for this request."""
     return SessionService(session=session)
+
+
+def get_message_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> MessageService:
+    """Construct `MessageService` for this request."""
+    return MessageService(session=session)

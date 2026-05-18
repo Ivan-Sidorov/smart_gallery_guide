@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from sqlalchemy import text
 
 from api.logging import bind_request_id, configure_logging, reset_request_id
-from api.routers import asr, exhibits, faq, health, qa, sessions, tasks
+from api.routers import asr, exhibits, faq, health, messages, qa, sessions, tasks
 from core.settings import Settings, get_settings
 from db.session import get_engine
 
@@ -155,6 +155,7 @@ def create_app() -> FastAPI:
     app.include_router(qa.router)
     app.include_router(tasks.router)
     app.include_router(sessions.router)
+    app.include_router(messages.router)
 
     return app
 

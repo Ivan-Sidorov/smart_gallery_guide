@@ -1,5 +1,7 @@
 """Exhibit search/recognize endpoints."""
 
+import uuid
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -62,6 +64,8 @@ async def recognize_exhibit(
     image: UploadFile = File(...),
     top_k: int | None = Form(default=None),
     score_threshold: float | None = Form(default=None),
+    user_id: int | None = Form(default=None),
+    session_id: uuid.UUID | None = Form(default=None),
     service: ExhibitService = Depends(get_exhibit_service),
 ) -> list[ExhibitSearchResultDTO]:
     """Recognise an exhibit from a user photo (SigLIP + Chroma)."""

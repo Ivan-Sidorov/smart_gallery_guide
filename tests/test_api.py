@@ -27,10 +27,12 @@ from api.deps import (  # noqa: E402
     get_db_session,
     get_exhibit_service,
     get_faq_service,
+    get_message_service,
     get_qa_service,
     get_session_service,
     get_task_service,
 )
+from api.schemas.messages import MessageCreateRequest, MessageDTO  # noqa: E402
 from api.main import create_app  # noqa: E402
 from api.schemas.exhibits import ExhibitDTO, ExhibitSearchResultDTO  # noqa: E402
 from api.schemas.faq import FAQSearchResultDTO  # noqa: E402
@@ -182,6 +184,40 @@ class _FakeQAService:
         return QAResponse(mode="task", task_id=task.id)
 
 
+class _FakeMessageService:
+    def __init__(self, sessions: "_FakeSessionService") -> None:
+        self._sessions = sessions
+        self._next_id = 1
+
+    async def create_exhibit_event(self, payload: MessageCreateRequest) -> MessageDTO:
+        session = await self._sessions.get(payload.session_id)
+        if session is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.user_id != payload.user_id:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=403, detail="Session does not belong to this user"
+            )
+        dto = MessageDTO(
+            id=self._next_id,
+            session_id=payload.session_id,
+            user_id=payload.user_id,
+            direction="in",
+            type="callback" if payload.event == "select" else "text",
+            content=payload.content,
+            attachments={
+                "exhibit_id": payload.exhibit_id,
+                "event": payload.event,
+            },
+            created_at=datetime.now(timezone.utc),
+        )
+        self._next_id += 1
+        return dto
+
+
 class _FakeSessionService:
     def __init__(self) -> None:
         self.sessions: dict[uuid.UUID, SessionDTO] = {}
@@ -235,6 +271,7 @@ def fake_services():
     tasks = _FakeTaskService()
     qa = _FakeQAService(faq=faq, tasks=tasks)
     sessions = _FakeSessionService()
+    messages = _FakeMessageService(sessions)
     return {
         "exhibits": exhibits,
         "asr": asr,
@@ -242,6 +279,7 @@ def fake_services():
         "tasks": tasks,
         "qa": qa,
         "sessions": sessions,
+        "messages": messages,
     }
 
 
@@ -260,6 +298,7 @@ async def client(fake_services):
     app.dependency_overrides[get_task_service] = lambda: fake_services["tasks"]
     app.dependency_overrides[get_qa_service] = lambda: fake_services["qa"]
     app.dependency_overrides[get_session_service] = lambda: fake_services["sessions"]
+    app.dependency_overrides[get_message_service] = lambda: fake_services["messages"]
 
     async with LifespanManager(app):
         async with AsyncClient(
@@ -510,3 +549,69 @@ async def test_session_404(client):
     """404 when session not found."""
     response = await client.get(f"/v1/sessions/{uuid.uuid4()}")
     assert response.status_code == 404
+
+
+# --------------------------------------------------------------------- messages
+
+
+async def test_log_exhibit_event_ok(client):
+    """Log select/question events for analytics."""
+    session = await client.post("/v1/sessions", json={"user_id": 42})
+    sid = session.json()["id"]
+
+    response = await client.post(
+        "/v1/messages",
+        json={
+            "session_id": sid,
+            "user_id": 42,
+            "exhibit_id": "ex-1",
+            "event": "select",
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["user_id"] == 42
+    assert body["attachments"]["exhibit_id"] == "ex-1"
+    assert body["attachments"]["event"] == "select"
+
+    question = await client.post(
+        "/v1/messages",
+        json={
+            "session_id": sid,
+            "user_id": 42,
+            "exhibit_id": "ex-1",
+            "event": "question",
+            "content": "Кто автор?",
+        },
+    )
+    assert question.status_code == 201
+    assert question.json()["content"] == "Кто автор?"
+
+
+async def test_log_exhibit_event_wrong_user(client):
+    """403 when user_id does not match session owner."""
+    session = await client.post("/v1/sessions", json={"user_id": 1})
+    sid = session.json()["id"]
+
+    response = await client.post(
+        "/v1/messages",
+        json={
+            "session_id": sid,
+            "user_id": 2,
+            "exhibit_id": "ex-1",
+            "event": "select",
+        },
+    )
+    assert response.status_code == 403
+
+
+async def test_search_exhibits_with_user_context(client):
+    """Search accepts user_id and session_id for attribution."""
+    session = await client.post("/v1/sessions", json={"user_id": 7})
+    sid = session.json()["id"]
+
+    response = await client.post(
+        "/v1/exhibits/search",
+        json={"query": "ночь", "user_id": 7, "session_id": sid},
+    )
+    assert response.status_code == 200

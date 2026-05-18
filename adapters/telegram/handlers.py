@@ -128,6 +128,35 @@ async def _update_session_context(
     return new_ctx
 
 
+async def _log_exhibit_event(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    session: tuple[uuid.UUID, dict[str, Any]] | None,
+    *,
+    exhibit_id: str,
+    event: str,
+    content: str | None = None,
+) -> None:
+    """Persist a user–exhibit interaction when session and user are known."""
+    if session is None:
+        return
+    user_id = _user_id(update)
+    if user_id is None:
+        return
+    sid, _ = session
+    api = _api(context)
+    try:
+        await api.log_exhibit_event(
+            session_id=sid,
+            user_id=user_id,
+            exhibit_id=exhibit_id,
+            event=event,
+            content=content,
+        )
+    except APIClientError as exc:
+        logger.warning("[telegram:handlers] log exhibit event failed: %s", exc)
+
+
 async def _send_exhibit_card(
     message: Any,
     exhibit: ExhibitDTO,
@@ -246,7 +275,13 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "Распознаю экспонат...", update=update, message=processing_msg
         )
         api = _api(context)
-        results = await api.recognize_exhibit(image_bytes)
+        user_id = _user_id(update)
+        session_id = session[0] if session is not None else None
+        results = await api.recognize_exhibit(
+            image_bytes,
+            user_id=user_id,
+            session_id=session_id,
+        )
 
         if not results:
             await safe_edit_text(
@@ -272,6 +307,9 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                         SEARCH_MODE_KEY: None,
                     },
                 )
+            await _log_exhibit_event(
+                update, context, session, exhibit_id=exhibit_id, event="select"
+            )
 
             await safe_edit_text(
                 "Нашёл экспонат — отправляю карточку ниже.",
@@ -480,7 +518,11 @@ async def _do_text_search(
 
     try:
         api = _api(context)
-        results = await api.search_exhibits(query)
+        user_id = _user_id(update)
+        session_id = session[0] if session is not None else None
+        results = await api.search_exhibits(
+            query, user_id=user_id, session_id=session_id
+        )
 
         if not results:
             await safe_edit_text(
@@ -505,6 +547,9 @@ async def _do_text_search(
                         SEARCH_MODE_KEY: None,
                     },
                 )
+            await _log_exhibit_event(
+                update, context, session, exhibit_id=exhibit_id, event="select"
+            )
             await safe_edit_text(
                 "Нашёл экспонат — отправляю карточку ниже.",
                 update=update,
@@ -557,6 +602,15 @@ async def _do_exhibit_question(
 
     user_id = _user_id(update)
     sid = session[0] if session is not None else None
+
+    await _log_exhibit_event(
+        update,
+        context,
+        session,
+        exhibit_id=exhibit_id,
+        event="question",
+        content=question,
+    )
 
     api = _api(context)
     try:
@@ -776,6 +830,9 @@ async def _handle_exhibit_selection(
             )
         return
 
+    await _log_exhibit_event(
+        update, context, session, exhibit_id=exhibit_id, event="select"
+    )
     await safe_edit_text(
         "Открыл карточку экспоната ниже.",
         callback_query=callback_query,
