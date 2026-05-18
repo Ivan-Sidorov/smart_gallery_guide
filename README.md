@@ -195,7 +195,7 @@ python3 scripts/reindex_chroma.py
 * `VLLM_VLM_MODEL` — идентификатор модели.
 * `VLLM_VLM_MAX_TOKENS`, `VLLM_VLM_TEMPERATURE` — параметры генерации.
 * `VLLM_API_KEY` — ключ доступа к API.
-* `VLLM_SYSTEM_PROMPT` — системный промпт.
+* Системные промпты VLM — `core/vlm/prompts.py` (`DEFAULT_BASE_SYSTEM_PROMPT`, `DEFAULT_SEARCH_EVAL_SYSTEM_PROMPT`).
 
 **Энкодеры**
 * `VISION_ENCODER_MODEL` — идентификатор визуального энкодера.
