@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # ----------------------------------------------------------------------- vLLM
     vllm_api_base_url: str = Field(
-        default="http://localhost:8000/v1", validation_alias="VLLM_API_BASE_URL"
+        default="http://localhost:2828/v1", validation_alias="VLLM_API_BASE_URL"
     )
     vllm_vlm_model: str = Field(
         default="Qwen/Qwen3-VL-8B-Instruct", validation_alias="VLLM_VLM_MODEL"
@@ -119,7 +119,7 @@ class Settings(BaseSettings):
 
     # ---------------------------------------------------------------------- FastAPI
     api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")
-    api_port: int = Field(default=8080, validation_alias="API_PORT")
+    api_port: int = Field(default=8081, validation_alias="API_PORT")
     api_log_level: str = Field(default="info", validation_alias="API_LOG_LEVEL")
     api_request_id_header: str = Field(
         default="X-Request-Id", validation_alias="API_REQUEST_ID_HEADER"
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------------- Telegram adapter
     # Base URL of the FastAPI backend the Telegram adapter calls over HTTP
     adapter_backend_url: str = Field(
-        default="http://localhost:8080", validation_alias="ADAPTER_BACKEND_URL"
+        default="http://localhost:8081", validation_alias="ADAPTER_BACKEND_URL"
     )
     # HTTP timeout (seconds) for adapter -> API calls
     adapter_http_timeout_s: float = Field(

@@ -1,18 +1,62 @@
 """Formatting helpers and Telegram I/O wrappers used by the adapter."""
 
 import asyncio
+import contextlib
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from telegram import Update
+from telegram.constants import ChatAction
 from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import ContextTypes
 
 from api.schemas.exhibits import ExhibitDTO, ExhibitSearchResultDTO
 from api.schemas.faq import FAQSearchResultDTO
+from core.vlm.client import VLM_NO_ANSWER_TEXT
 
 logger = logging.getLogger(__name__)
+
+# Telegram shows the typing indicator for ~5 seconds per sendChatAction call.
+TYPING_ACTION_REFRESH_SECONDS = 4.0
+
+
+@asynccontextmanager
+async def typing_while(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    *,
+    action: ChatAction = ChatAction.TYPING,
+) -> AsyncIterator[None]:
+    """Keep the chat action alive until the wrapped block finishes."""
+    stop = asyncio.Event()
+
+    async def _refresh() -> None:
+        while not stop.is_set():
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action=action)
+            except BadRequest as exc:
+                logger.warning("[utils] send_chat_action failed: %s", exc)
+                return
+            except (TimedOut, NetworkError) as exc:
+                logger.warning("[utils] send_chat_action network error: %s", exc)
+            try:
+                await asyncio.wait_for(
+                    stop.wait(), timeout=TYPING_ACTION_REFRESH_SECONDS
+                )
+            except asyncio.TimeoutError:
+                continue
+
+    task = asyncio.create_task(_refresh())
+    try:
+        yield
+    finally:
+        stop.set()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def download_audio_bytes(
@@ -152,6 +196,23 @@ async def safe_edit_text(
                     parse_mode=parse_mode,
                 )
             return
+
+
+async def safe_delete_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    message_id: int,
+) -> bool:
+    """Delete a chat message; return False on expected Telegram errors."""
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        return True
+    except BadRequest as exc:
+        logger.warning("[utils] delete_message failed: %s", exc)
+        return False
+    except (TimedOut, NetworkError) as exc:
+        logger.warning("[utils] delete_message network error: %s", exc)
+        return False
 
 
 async def safe_reply_text(
@@ -324,11 +385,47 @@ def format_faq_results(results: list[FAQSearchResultDTO]) -> str:
     return "\n".join(lines)
 
 
+UNAVAILABLE_ANSWER_TEXT = "Сейчас не получается ответить на вопрос. Попробуйте позже."
+
+# Older user-facing stubs that must not be shown.
+_UNAVAILABLE_LEGACY_TEXTS = frozenset(
+    {
+        VLM_NO_ANSWER_TEXT,
+        "Сервер сейчас не отвечает. Попробуйте позже.",
+        "Ответ занимает слишком много времени. Попробуйте позже.",
+        "Произошла сетевая ошибка. Попробуйте ещё раз.",
+        "Произошла ошибка при обработке изображения. Попробуйте ещё раз.",
+        "Произошла ошибка при обработке аудио. Попробуйте ещё раз.",
+        "Произошла ошибка при поиске. Попробуйте ещё раз.",
+        "Произошла ошибка. Попробуйте ещё раз.",
+        "Произошла ошибка. Пожалуйста, попробуйте ещё раз.",
+    }
+)
+
+_UNAVAILABLE_ANSWER_MARKERS = (
+    "Ошибка при обращении к VLM API",
+    '"detail"',
+    "'detail'",
+)
+
+
+def is_unusable_model_answer(answer: str | None) -> bool:
+    """True when the model output should not be shown to the user."""
+    if not answer or not answer.strip():
+        return True
+    text = answer.strip()
+    if text in _UNAVAILABLE_LEGACY_TEXTS:
+        return True
+    if text.startswith("{") and "detail" in text:
+        return True
+    return any(marker in text for marker in _UNAVAILABLE_ANSWER_MARKERS)
+
+
 def format_vlm_answer(answer: str | None) -> str:
     """Render the VLM answer for display."""
-    if not answer:
-        return "Не удалось получить ответ."
-    return answer
+    if is_unusable_model_answer(answer):
+        return UNAVAILABLE_ANSWER_TEXT
+    return answer.strip()
 
 
 def truncate_text(text: str, max_length: int = 4096) -> str:

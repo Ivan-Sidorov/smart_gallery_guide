@@ -43,7 +43,8 @@ def get_answer_keyboard(
     message_id: int | None,
     exhibit_id: str | None = None,
     *,
-    rated: bool = False,
+    show_rating: bool = True,
+    show_comment_prompt: bool = False,
 ) -> InlineKeyboardMarkup | None:
     """Inline keyboard with like/dislike and optional back-to-exhibit button."""
     if message_id is None and exhibit_id is None:
@@ -51,15 +52,20 @@ def get_answer_keyboard(
 
     keyboard: list[list[InlineKeyboardButton]] = []
     if message_id is not None:
-        if rated:
-            keyboard.append(
-                [InlineKeyboardButton("Спасибо за оценку!", callback_data="noop")]
-            )
-        else:
+        if show_rating:
             keyboard.append(
                 [
                     InlineKeyboardButton("👍", callback_data=f"fb:{message_id}:1"),
                     InlineKeyboardButton("👎", callback_data=f"fb:{message_id}:-1"),
+                ]
+            )
+        elif show_comment_prompt:
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        "✏️ Оставить комментарий",
+                        callback_data=f"fb_comment:{message_id}",
+                    )
                 ]
             )
     if exhibit_id:

@@ -142,7 +142,7 @@ class GuideAgent:
             metadata = self.vector_db.get_exhibit_metadata(exhibit_id)
             if not metadata:
                 logger.warning(f"Exhibit {exhibit_id} not found for text question")
-                return "Экспонат не найден. Пожалуйста, выберите экспонат сначала."
+                return "Экспонат не найден. Пожалуйста, сначала выберите экспонат."
 
             faq_results = await self.search_faq(
                 question=question, exhibit_id=exhibit_id, limit=3

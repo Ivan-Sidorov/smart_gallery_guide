@@ -84,7 +84,7 @@ services:
       CHROMA_PERSIST_DIR: /app/chroma_store
       HF_HOME: /home/appuser/.cache/huggingface
       API_HOST: 0.0.0.0
-      API_PORT: "8080"
+      API_PORT: "8081"
       API_LOAD_ML: "${API_LOAD_ML:-true}"
       ASR_ENCODER_MODEL: "${ASR_ENCODER_MODEL:-openai/whisper-small}"
       ASR_ENCODER_LANGUAGE: "${ASR_ENCODER_LANGUAGE:-russian}"
@@ -95,13 +95,13 @@ services:
       WEB_SEARCH_ENABLED: "${WEB_SEARCH_ENABLED:-true}"
       WEB_SEARCH_MAX_RESULTS: "${WEB_SEARCH_MAX_RESULTS:-5}"
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${API_PORT:-8081}:8081"
     volumes:
       - chroma_data:/app/chroma_store
       - exhibits_data:/app/data/exhibits
       - hf_cache_app:/home/appuser/.cache/huggingface
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz > /dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/healthz > /dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -120,7 +120,7 @@ services:
       api:
         condition: service_healthy
     environment:
-      ADAPTER_BACKEND_URL: http://api:8080
+      ADAPTER_BACKEND_URL: http://api:8081
       ADAPTER_LOG_LEVEL: "${ADAPTER_LOG_LEVEL:-info}"
       ADAPTER_HTTP_TIMEOUT_S: "${ADAPTER_HTTP_TIMEOUT_S:-30.0}"
       ADAPTER_TASK_POLL_INITIAL_S: "${ADAPTER_TASK_POLL_INITIAL_S:-0.5}"

@@ -64,8 +64,8 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 
 FROM runtime-base AS api
 
-EXPOSE 8080
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-graceful-shutdown", "30"]
+EXPOSE 8081
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8081", "--timeout-graceful-shutdown", "30"]
 
 
 FROM runtime-base AS adapter-telegram

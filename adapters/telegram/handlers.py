@@ -18,6 +18,7 @@ from adapters.telegram.api_client import (
 from adapters.telegram.keyboards import (
     get_answer_keyboard,
     get_back_to_exhibit_keyboard,
+    get_cancel_keyboard,
     get_exhibits_list_keyboard,
     get_main_keyboard,
 )
@@ -29,10 +30,14 @@ from adapters.telegram.utils import (
     format_exhibit_search_results,
     format_faq_results,
     format_vlm_answer,
+    is_unusable_model_answer,
+    safe_delete_message,
     safe_edit_text,
     safe_reply_photo,
     safe_reply_text,
+    typing_while,
     truncate_text,
+    UNAVAILABLE_ANSWER_TEXT,
 )
 from api.schemas.exhibits import ExhibitDTO
 
@@ -49,6 +54,14 @@ CURRENT_EXHIBIT_KEY = "current_exhibit_id"
 WAITING_FOR_QUESTION_KEY = "waiting_for_question"
 SEARCH_MODE_KEY = "search_mode"
 PENDING_FEEDBACK_MESSAGE_KEY = "pending_feedback_message_id"
+PENDING_FEEDBACK_PROMPT_CHAT_KEY = "pending_feedback_prompt_chat_id"
+PENDING_FEEDBACK_PROMPT_MSG_KEY = "pending_feedback_prompt_message_id"
+
+_PENDING_FEEDBACK_CLEAR: dict[str, None] = {
+    PENDING_FEEDBACK_MESSAGE_KEY: None,
+    PENDING_FEEDBACK_PROMPT_CHAT_KEY: None,
+    PENDING_FEEDBACK_PROMPT_MSG_KEY: None,
+}
 
 
 def _api(context: ContextTypes.DEFAULT_TYPE) -> APIClient:
@@ -193,7 +206,6 @@ async def _log_bot_reply(
 async def _render_bot_answer(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    processing_msg: Any,
     answer: str,
     *,
     session: tuple[uuid.UUID, dict[str, Any]] | None,
@@ -201,6 +213,10 @@ async def _render_bot_answer(
     api_task_id: uuid.UUID | None = None,
 ) -> None:
     """Show a bot answer with optional feedback buttons."""
+    message = update.message
+    if message is None:
+        return
+
     text = truncate_text(format_vlm_answer(answer))
     message_id = await _log_bot_reply(
         update,
@@ -210,10 +226,9 @@ async def _render_bot_answer(
         exhibit_id=exhibit_id,
         api_task_id=api_task_id,
     )
-    await safe_edit_text(
+    await safe_reply_text(
+        message,
         text,
-        update=update,
-        message=processing_msg,
         reply_markup=get_answer_keyboard(message_id, exhibit_id),
     )
 
@@ -312,73 +327,57 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle a photo message: try to recognise the exhibit."""
     await _bind_request_id(update)
-    if not update.message:
+    message = update.message
+    if message is None:
         return
 
     session = await _ensure_session(update, context)
 
-    processing_msg = await update.message.reply_text(
-        "Обрабатываю изображение...",
-        reply_markup=get_main_keyboard(),
-    )
+    image_bytes = await download_photo_bytes(update, context)
+    if not image_bytes:
+        await safe_reply_text(message, "Не удалось загрузить изображение.")
+        return
+
+    api = _api(context)
+    user_id = _user_id(update)
+    session_id = session[0] if session is not None else None
 
     try:
-        image_bytes = await download_photo_bytes(update, context)
-        if not image_bytes:
-            await safe_edit_text(
-                "Не удалось загрузить изображение.",
-                update=update,
-                message=processing_msg,
+        async with typing_while(context, message.chat_id):
+            results = await api.recognize_exhibit(
+                image_bytes,
+                user_id=user_id,
+                session_id=session_id,
             )
-            return
 
-        await safe_edit_text(
-            "Распознаю экспонат...", update=update, message=processing_msg
-        )
-        api = _api(context)
-        user_id = _user_id(update)
-        session_id = session[0] if session is not None else None
-        results = await api.recognize_exhibit(
-            image_bytes,
-            user_id=user_id,
-            session_id=session_id,
-        )
-
-        if not results:
-            await safe_edit_text(
-                "Экспонат не найден. Попробуйте другое изображение или "
-                "используйте текстовый поиск.",
-                update=update,
-                message=processing_msg,
-            )
-            return
-
-        if len(results) == 1:
-            result = results[0]
-            exhibit_id = result.exhibit_id
-            if session is not None:
-                sid, ctx = session
-                await _update_session_context(
-                    context,
-                    sid,
-                    ctx,
-                    {
-                        CURRENT_EXHIBIT_KEY: exhibit_id,
-                        WAITING_FOR_QUESTION_KEY: None,
-                        SEARCH_MODE_KEY: None,
-                    },
+            if not results:
+                await safe_reply_text(
+                    message,
+                    "Экспонат не найден. Попробуйте другое изображение или "
+                    "используйте текстовый поиск.",
                 )
-            await _log_exhibit_event(
-                update, context, session, exhibit_id=exhibit_id, event="select"
-            )
+                return
 
-            await safe_edit_text(
-                "Нашёл экспонат — отправляю карточку ниже.",
-                update=update,
-                message=processing_msg,
-            )
-            await _render_exhibit(context, processing_msg, exhibit_id)
-        else:
+            if len(results) == 1:
+                exhibit_id = results[0].exhibit_id
+                if session is not None:
+                    sid, ctx = session
+                    await _update_session_context(
+                        context,
+                        sid,
+                        ctx,
+                        {
+                            CURRENT_EXHIBIT_KEY: exhibit_id,
+                            WAITING_FOR_QUESTION_KEY: None,
+                            SEARCH_MODE_KEY: None,
+                        },
+                    )
+                await _log_exhibit_event(
+                    update, context, session, exhibit_id=exhibit_id, event="select"
+                )
+                await _render_exhibit(context, message, exhibit_id)
+                return
+
             if session is not None:
                 sid, ctx = session
                 await _update_session_context(
@@ -387,107 +386,104 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     ctx,
                     {SEARCH_MODE_KEY: None, WAITING_FOR_QUESTION_KEY: None},
                 )
-            text = format_exhibit_search_results(results)
-            await safe_edit_text(
-                truncate_text(text),
-                update=update,
-                message=processing_msg,
+            await safe_reply_text(
+                message,
+                truncate_text(format_exhibit_search_results(results)),
                 reply_markup=get_exhibits_list_keyboard(results),
                 parse_mode=ParseMode.MARKDOWN,
             )
-
     except APIClientError as exc:
         logger.error("[telegram:handlers] photo_handler API error: %s", exc)
-        await safe_edit_text(
-            "Сервер сейчас не отвечает. Попробуйте позже.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
     except (TimedOut, NetworkError) as exc:
         logger.warning("[telegram:handlers] photo_handler network error: %s", exc)
-        await safe_edit_text(
-            "Произошла сетевая ошибка. Попробуйте ещё раз.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
     except Exception:
         logger.exception("[telegram:handlers] photo_handler unexpected error")
-        await safe_edit_text(
-            "Произошла ошибка при обработке изображения. Попробуйте ещё раз.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
 
 
 async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle voice/audio: transcribe via ASR, then reuse the text pipeline."""
     await _bind_request_id(update)
-    if not update.message:
+    message = update.message
+    if message is None:
         return
 
-    processing_msg = await update.message.reply_text(
-        "Распознаю речь...",
-        reply_markup=get_main_keyboard(),
-    )
+    api = _api(context)
 
     try:
-        downloaded = await download_audio_bytes(update, context)
-        if not downloaded:
-            await safe_edit_text(
-                "Не удалось загрузить аудио.",
-                update=update,
-                message=processing_msg,
-            )
-            return
+        async with typing_while(context, message.chat_id):
+            downloaded = await download_audio_bytes(update, context)
+            if not downloaded:
+                await safe_reply_text(message, "Не удалось загрузить аудио.")
+                return
 
-        audio_bytes, filename, content_type = downloaded
-        api = _api(context)
-        try:
+            audio_bytes, filename, content_type = downloaded
             result = await api.transcribe_audio(
                 audio_bytes,
                 filename=filename,
                 content_type=content_type,
             )
-        except APIClientError as exc:
-            logger.error("[telegram:handlers] transcribe_audio API error: %s", exc)
-            await safe_edit_text(
-                "Сервер сейчас не отвечает. Попробуйте позже.",
-                update=update,
-                message=processing_msg,
-            )
-            return
+            text = result.text.strip()
+            if not text:
+                await safe_reply_text(
+                    message,
+                    "Не удалось распознать речь. Попробуйте ещё раз.",
+                )
+                return
 
-        text = result.text.strip()
-        if not text:
-            await safe_edit_text(
-                "Не удалось распознать речь. Попробуйте ещё раз.",
-                update=update,
-                message=processing_msg,
-            )
-            return
-
-        await safe_edit_text(
-            f"Распознано: _{truncate_text(text, max_length=500)}_",
-            update=update,
-            message=processing_msg,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        await _handle_user_text(update, context, text)
-
+            await _handle_user_text(update, context, text)
+    except APIClientError as exc:
+        logger.error("[telegram:handlers] transcribe_audio API error: %s", exc)
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
     except (TimedOut, NetworkError) as exc:
         logger.warning("[telegram:handlers] voice_handler network error: %s", exc)
-        await safe_edit_text(
-            "Произошла сетевая ошибка. Попробуйте ещё раз.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
     except Exception:
         logger.exception("[telegram:handlers] voice_handler unexpected error")
-        await safe_edit_text(
-            "Произошла ошибка при обработке аудио. Попробуйте ещё раз.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
+
+
+async def _cancel_feedback_comment(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    session_id: uuid.UUID,
+    ctx_data: dict[str, Any],
+) -> None:
+    """Silently exit the feedback-comment flow (delete prompt and user's cancel tap)."""
+    prompt_chat_id = ctx_data.get(PENDING_FEEDBACK_PROMPT_CHAT_KEY)
+    prompt_message_id = ctx_data.get(PENDING_FEEDBACK_PROMPT_MSG_KEY)
+
+    await _update_session_context(
+        context,
+        session_id,
+        ctx_data,
+        _PENDING_FEEDBACK_CLEAR,
+    )
+
+    if isinstance(prompt_chat_id, int) and isinstance(prompt_message_id, int):
+        await safe_delete_message(context, prompt_chat_id, prompt_message_id)
+
+    message = update.message
+    if message is not None:
+        await safe_delete_message(context, message.chat_id, message.message_id)
+
+    chat = update.effective_chat
+    if chat is not None:
+        try:
+            keyboard_msg = await context.bot.send_message(
+                chat_id=chat.id,
+                text="\u200b",
+                reply_markup=get_main_keyboard(),
+                disable_notification=True,
+            )
+            await safe_delete_message(context, chat.id, keyboard_msg.message_id)
+        except (TimedOut, NetworkError) as exc:
+            logger.warning(
+                "[telegram:handlers] failed to restore keyboard after comment cancel: %s",
+                exc,
+            )
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -512,6 +508,24 @@ async def _handle_user_text(
     if session is not None:
         sid, ctx_data = session
 
+    if text == "Отмена":
+        if sid is not None and ctx_data.get(PENDING_FEEDBACK_MESSAGE_KEY) is not None:
+            await _cancel_feedback_comment(update, context, sid, ctx_data)
+            return
+        if sid is not None:
+            await _update_session_context(
+                context,
+                sid,
+                ctx_data,
+                {
+                    SEARCH_MODE_KEY: None,
+                    WAITING_FOR_QUESTION_KEY: None,
+                    **_PENDING_FEEDBACK_CLEAR,
+                },
+            )
+        await update.message.reply_text("Отменено.", reply_markup=get_main_keyboard())
+        return
+
     pending_feedback_id = ctx_data.get(PENDING_FEEDBACK_MESSAGE_KEY)
     if pending_feedback_id is not None and sid is not None:
         user_id = _user_id(update)
@@ -527,10 +541,11 @@ async def _handle_user_text(
             except APIClientError as exc:
                 logger.warning("[telegram:handlers] feedback comment failed: %s", exc)
             else:
-                await update.message.reply_text("Спасибо за комментарий!")
-        await _update_session_context(
-            context, sid, ctx_data, {PENDING_FEEDBACK_MESSAGE_KEY: None}
-        )
+                await update.message.reply_text(
+                    "Спасибо за комментарий!",
+                    reply_markup=get_main_keyboard(),
+                )
+        await _update_session_context(context, sid, ctx_data, _PENDING_FEEDBACK_CLEAR)
         return
 
     if text == "Поиск экспонатов":
@@ -542,7 +557,7 @@ async def _handle_user_text(
                 {
                     SEARCH_MODE_KEY: True,
                     WAITING_FOR_QUESTION_KEY: None,
-                    PENDING_FEEDBACK_MESSAGE_KEY: None,
+                    **_PENDING_FEEDBACK_CLEAR,
                 },
             )
         await update.message.reply_text(
@@ -554,21 +569,6 @@ async def _handle_user_text(
 
     if text == "Помощь":
         await help_command(update, context)
-        return
-
-    if text == "Отмена":
-        if sid is not None:
-            await _update_session_context(
-                context,
-                sid,
-                ctx_data,
-                {
-                    SEARCH_MODE_KEY: None,
-                    WAITING_FOR_QUESTION_KEY: None,
-                    PENDING_FEEDBACK_MESSAGE_KEY: None,
-                },
-            )
-        await update.message.reply_text("Отменено.", reply_markup=get_main_keyboard())
         return
 
     search_mode = bool(ctx_data.get(SEARCH_MODE_KEY))
@@ -601,75 +601,55 @@ async def _do_text_search(
         logger.warning("[handlers] _do_text_search called without message")
         return
 
-    processing_msg = await message.reply_text(
-        "Ищу экспонаты...",
-        reply_markup=get_main_keyboard(),
-    )
-
     try:
         api = _api(context)
         user_id = _user_id(update)
         session_id = session[0] if session is not None else None
-        results = await api.search_exhibits(
-            query, user_id=user_id, session_id=session_id
-        )
-
-        if not results:
-            await safe_edit_text(
-                "Экспонаты не найдены. Попробуйте другой запрос или отправьте фото.",
-                update=update,
-                message=processing_msg,
+        async with typing_while(context, message.chat_id):
+            results = await api.search_exhibits(
+                query, user_id=user_id, session_id=session_id
             )
-            return
 
-        if len(results) == 1:
-            result = results[0]
-            exhibit_id = result.exhibit_id
-            if session is not None:
-                sid, ctx_data = session
-                await _update_session_context(
-                    context,
-                    sid,
-                    ctx_data,
-                    {
-                        CURRENT_EXHIBIT_KEY: exhibit_id,
-                        WAITING_FOR_QUESTION_KEY: None,
-                        SEARCH_MODE_KEY: None,
-                    },
+            if not results:
+                await safe_reply_text(
+                    message,
+                    "Экспонаты не найдены. Попробуйте другой запрос или отправьте фото.",
                 )
-            await _log_exhibit_event(
-                update, context, session, exhibit_id=exhibit_id, event="select"
-            )
-            await safe_edit_text(
-                "Нашёл экспонат — отправляю карточку ниже.",
-                update=update,
-                message=processing_msg,
-            )
-            await _render_exhibit(context, processing_msg, exhibit_id, fallback=result)
-        else:
-            text_result = format_exhibit_search_results(results)
-            await safe_edit_text(
-                truncate_text(text_result),
-                update=update,
-                message=processing_msg,
+                return
+
+            if len(results) == 1:
+                result = results[0]
+                exhibit_id = result.exhibit_id
+                if session is not None:
+                    sid, ctx_data = session
+                    await _update_session_context(
+                        context,
+                        sid,
+                        ctx_data,
+                        {
+                            CURRENT_EXHIBIT_KEY: exhibit_id,
+                            WAITING_FOR_QUESTION_KEY: None,
+                            SEARCH_MODE_KEY: None,
+                        },
+                    )
+                await _log_exhibit_event(
+                    update, context, session, exhibit_id=exhibit_id, event="select"
+                )
+                await _render_exhibit(context, message, exhibit_id, fallback=result)
+                return
+
+            await safe_reply_text(
+                message,
+                truncate_text(format_exhibit_search_results(results)),
                 reply_markup=get_exhibits_list_keyboard(results),
                 parse_mode=ParseMode.MARKDOWN,
             )
-
     except APIClientError as exc:
         logger.error("[handlers] _do_text_search API error: %s", exc)
-        await safe_edit_text(
-            "Сервер сейчас не отвечает. Попробуйте позже.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
     except Exception:
         logger.exception("[handlers] _do_text_search unexpected error")
-        await safe_edit_text(
-            "Произошла ошибка при поиске. Попробуйте ещё раз.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
 
 
 async def _do_exhibit_question(
@@ -685,11 +665,6 @@ async def _do_exhibit_question(
         logger.warning("[handlers] _do_exhibit_question called without message")
         return
 
-    processing_msg = await message.reply_text(
-        "Думаю...",
-        reply_markup=get_main_keyboard(),
-    )
-
     user_id = _user_id(update)
     sid = session[0] if session is not None else None
 
@@ -704,53 +679,44 @@ async def _do_exhibit_question(
 
     api = _api(context)
     try:
-        response = await api.qa_exhibit(
-            exhibit_id=exhibit_id,
-            question=question,
-            user_id=user_id,
-            session_id=sid,
-        )
+        async with typing_while(context, message.chat_id):
+            response = await api.qa_exhibit(
+                exhibit_id=exhibit_id,
+                question=question,
+                user_id=user_id,
+                session_id=sid,
+            )
+
+            if response.mode == "faq" and response.answer is not None:
+                if session is not None:
+                    sid, ctx_data = session
+                    await _update_session_context(
+                        context, sid, ctx_data, {WAITING_FOR_QUESTION_KEY: None}
+                    )
+                await _render_bot_answer(
+                    update,
+                    context,
+                    response.answer,
+                    session=session,
+                    exhibit_id=exhibit_id,
+                )
+                return
+
+            if response.task_id is None:
+                await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
+                return
+
+            await _wait_and_render_task(
+                update,
+                context,
+                response.task_id,
+                exhibit_id=exhibit_id,
+                session=session,
+            )
     except APIClientError as exc:
         logger.error("[handlers] qa_exhibit API error: %s", exc)
-        await safe_edit_text(
-            "Сервер сейчас не отвечает. Попробуйте позже.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
         return
-
-    if response.mode == "faq" and response.answer is not None:
-        if session is not None:
-            sid, ctx_data = session
-            await _update_session_context(
-                context, sid, ctx_data, {WAITING_FOR_QUESTION_KEY: None}
-            )
-        await _render_bot_answer(
-            update,
-            context,
-            processing_msg,
-            response.answer,
-            session=session,
-            exhibit_id=exhibit_id,
-        )
-        return
-
-    if response.task_id is None:
-        await safe_edit_text(
-            "Не удалось обработать вопрос. Попробуйте позже.",
-            update=update,
-            message=processing_msg,
-        )
-        return
-
-    await _wait_and_render_task(
-        update,
-        context,
-        processing_msg,
-        response.task_id,
-        exhibit_id=exhibit_id,
-        session=session,
-    )
 
     if session is not None:
         sid, ctx_data = session
@@ -762,70 +728,51 @@ async def _do_exhibit_question(
 async def _wait_and_render_task(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    processing_msg: Any,
     task_id: uuid.UUID,
     *,
     exhibit_id: str | None = None,
     session: tuple[uuid.UUID, dict[str, Any]] | None = None,
 ) -> None:
     """Poll the task to completion and render the result back to chat."""
-    api = _api(context)
+    message = update.message
+    if message is None:
+        return
 
-    async def _on_status(task: Any) -> None:
-        if task.status == "running":
-            await safe_edit_text(
-                "Готовлю ответ...",
-                update=update,
-                message=processing_msg,
-            )
+    api = _api(context)
+    back_keyboard = get_back_to_exhibit_keyboard(exhibit_id) if exhibit_id else None
 
     try:
-        task = await api.wait_for_task(task_id, on_status=_on_status)
+        task = await api.wait_for_task(task_id)
     except TaskTimeoutError:
-        await safe_edit_text(
-            "Ответ занимает слишком много времени. Попробуйте позже.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
         return
     except APIClientError as exc:
         logger.error("[handlers] wait_for_task API error: %s", exc)
-        await safe_edit_text(
-            "Сервер сейчас не отвечает. Попробуйте позже.",
-            update=update,
-            message=processing_msg,
-        )
+        await safe_reply_text(message, UNAVAILABLE_ANSWER_TEXT)
         return
 
     if task.status == "error":
         logger.warning("[handlers] task %s errored: %s", task_id, task.error)
-        await safe_edit_text(
-            "Не удалось получить ответ. Попробуйте ещё раз.",
-            update=update,
-            message=processing_msg,
-            reply_markup=(
-                get_back_to_exhibit_keyboard(exhibit_id) if exhibit_id else None
-            ),
+        await safe_reply_text(
+            message,
+            UNAVAILABLE_ANSWER_TEXT,
+            reply_markup=back_keyboard,
         )
         return
 
     answer = ""
     if isinstance(task.result, dict):
         answer = str(task.result.get("answer") or "").strip()
-    if not answer:
-        await safe_edit_text(
-            "Не удалось получить ответ. Попробуйте ещё раз.",
-            update=update,
-            message=processing_msg,
-            reply_markup=(
-                get_back_to_exhibit_keyboard(exhibit_id) if exhibit_id else None
-            ),
+    if not answer or is_unusable_model_answer(answer):
+        await safe_reply_text(
+            message,
+            UNAVAILABLE_ANSWER_TEXT,
+            reply_markup=back_keyboard,
         )
         return
     await _render_bot_answer(
         update,
         context,
-        processing_msg,
         answer,
         session=session,
         exhibit_id=exhibit_id,
@@ -855,12 +802,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     action = parts[0]
-    if action != "fb":
+    if action not in ("fb", "fb_comment"):
         await query.answer()
 
     try:
         if action == "fb":
             await _handle_feedback(update, context, parts[1:])
+        elif action == "fb_comment":
+            await _handle_feedback_comment(update, context, parts[1:])
         elif action == "select_exhibit":
             await _handle_exhibit_selection(update, context, parts[1])
         elif action == "exhibit_info":
@@ -872,7 +821,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception:
         logger.exception("[handlers] callback_handler unexpected error")
         try:
-            await query.edit_message_text("Произошла ошибка. Попробуйте ещё раз.")
+            await query.edit_message_text(UNAVAILABLE_ANSWER_TEXT)
         except Exception:
             pass
         if query.message:
@@ -951,23 +900,77 @@ async def _handle_feedback(
     if session is not None:
         _, ctx_data = session
         exhibit_id = ctx_data.get(CURRENT_EXHIBIT_KEY)
-        if rating == -1:
-            sid, ctx = session
-            await _update_session_context(
-                context,
-                sid,
-                ctx,
-                {PENDING_FEEDBACK_MESSAGE_KEY: message_id},
-            )
 
-    label = "Спасибо!" if rating == 1 else "Принято. Можете написать комментарий."
-    await callback_query.answer(label)
+    await callback_query.answer("Спасибо!" if rating == 1 else "Принято.")
 
     if callback_query.message:
         await safe_edit_text(
             callback_query.message.text or "",
             callback_query=callback_query,
-            reply_markup=get_answer_keyboard(message_id, exhibit_id, rated=True),
+            reply_markup=get_answer_keyboard(
+                message_id,
+                exhibit_id,
+                show_rating=False,
+                show_comment_prompt=(rating == -1),
+            ),
+        )
+
+
+async def _handle_feedback_comment(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    payload: list[str],
+) -> None:
+    """Start the optional comment flow after a dislike."""
+    callback_query = update.callback_query
+    if callback_query is None or not payload:
+        return
+
+    try:
+        message_id = int(payload[0])
+    except ValueError:
+        return
+
+    user_id = _user_id(update)
+    if user_id is None:
+        return
+
+    session = await _ensure_session(update, context)
+    exhibit_id: str | None = None
+    if session is not None:
+        sid, ctx = session
+        exhibit_id = ctx.get(CURRENT_EXHIBIT_KEY)
+
+    await callback_query.answer()
+
+    if callback_query.message:
+        await safe_edit_text(
+            callback_query.message.text or "",
+            callback_query=callback_query,
+            reply_markup=get_answer_keyboard(
+                message_id,
+                exhibit_id,
+                show_rating=False,
+                show_comment_prompt=False,
+            ),
+        )
+
+    if callback_query.message and session is not None:
+        sid, ctx = session
+        prompt_message = await callback_query.message.reply_text(
+            "Напишите комментарий к ответу одним сообщением. "
+            "Чтобы отменить — нажмите «Отмена».",
+            reply_markup=get_cancel_keyboard(),
+        )
+        await _update_session_context(
+            context,
+            sid,
+            ctx,
+            {
+                PENDING_FEEDBACK_MESSAGE_KEY: message_id,
+                PENDING_FEEDBACK_PROMPT_CHAT_KEY: prompt_message.chat_id,
+                PENDING_FEEDBACK_PROMPT_MSG_KEY: prompt_message.message_id,
+            },
         )
 
 
@@ -994,26 +997,33 @@ async def _handle_exhibit_selection(
             },
         )
 
+    if callback_query.message is None:
+        return
+
     api = _api(context)
-    exhibit = await api.get_exhibit(exhibit_id)
+    try:
+        async with typing_while(context, callback_query.message.chat_id):
+            exhibit = await api.get_exhibit(exhibit_id)
+    except APIClientError as exc:
+        logger.warning(
+            "[handlers] get_exhibit(%s) on select failed: %s", exhibit_id, exc
+        )
+        exhibit = None
+
     if exhibit is None:
         await safe_edit_text("Экспонат не найден.", callback_query=callback_query)
-        if callback_query.message:
-            await callback_query.message.reply_text(
-                "Открыл главное меню — используйте кнопки ниже.",
-                reply_markup=get_main_keyboard(),
-            )
+        await callback_query.message.reply_text(
+            "Открыл главное меню — используйте кнопки ниже.",
+            reply_markup=get_main_keyboard(),
+        )
         return
 
     await _log_exhibit_event(
         update, context, session, exhibit_id=exhibit_id, event="select"
     )
-    await safe_edit_text(
-        "Открыл карточку экспоната ниже.",
-        callback_query=callback_query,
-    )
-    if callback_query.message:
-        await _send_exhibit_card(callback_query.message, exhibit)
+    list_message = callback_query.message
+    await _send_exhibit_card(list_message, exhibit)
+    await safe_delete_message(context, list_message.chat_id, list_message.message_id)
 
 
 async def _handle_exhibit_info(
@@ -1027,23 +1037,28 @@ async def _handle_exhibit_info(
         )
         return
 
-    api = _api(context)
-    exhibit = await api.get_exhibit(exhibit_id)
-    if exhibit is None:
-        await safe_edit_text("Экспонат не найден.", callback_query=callback_query)
-        if callback_query.message:
-            await callback_query.message.reply_text(
-                "Открыл главное меню — используйте кнопки ниже.",
-                reply_markup=get_main_keyboard(),
-            )
+    if callback_query.message is None:
         return
 
-    await safe_edit_text(
-        "Отправляю полную карточку экспоната ниже.",
-        callback_query=callback_query,
-    )
-    if callback_query.message:
-        await _send_exhibit_card(callback_query.message, exhibit)
+    api = _api(context)
+    try:
+        async with typing_while(context, callback_query.message.chat_id):
+            exhibit = await api.get_exhibit(exhibit_id)
+    except APIClientError as exc:
+        logger.warning(
+            "[telegram:handlers] get_exhibit(%s) on info failed: %s", exhibit_id, exc
+        )
+        exhibit = None
+
+    if exhibit is None:
+        await safe_edit_text("Экспонат не найден.", callback_query=callback_query)
+        await callback_query.message.reply_text(
+            "Открыл главное меню — используйте кнопки ниже.",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+
+    await _send_exhibit_card(callback_query.message, exhibit)
 
 
 async def _handle_ask_question(
@@ -1109,7 +1124,7 @@ async def _handle_search_faq(
     except APIClientError as exc:
         logger.error("[telegram:handlers] search_faq API error: %s", exc)
         await safe_edit_text(
-            "Сервер сейчас не отвечает. Попробуйте позже.",
+            UNAVAILABLE_ANSWER_TEXT,
             callback_query=callback_query,
             reply_markup=get_back_to_exhibit_keyboard(exhibit_id),
         )
@@ -1136,8 +1151,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if isinstance(update, Update) and update.effective_message:
         try:
-            await update.effective_message.reply_text(
-                "Произошла ошибка. Пожалуйста, попробуйте ещё раз."
-            )
+            await update.effective_message.reply_text(UNAVAILABLE_ANSWER_TEXT)
         except Exception:
             pass

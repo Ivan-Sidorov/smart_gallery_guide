@@ -60,6 +60,64 @@ smart_gallery_guide/
 ### Переменные окружения
 На первом шаге необходимо задать переменные окружения. С полным списком можно ознакомиться в `env.example`.
 
+```bash
+cp env.example .env
+# отредактируйте .env при необходимости
+```
+
+### PostgreSQL локально (без Docker)
+
+API, worker и скрипты загрузки данных требуют работающий PostgreSQL. При старте API проверяется подключение и наличие схемы (таблица `exhibits`).
+
+Значения по умолчанию из `env.example`:
+
+```text
+DATABASE_URL=postgresql+asyncpg://smart_guide:smart_guide@localhost:5432/smart_guide
+```
+
+Убедитесь, что в `.env` указан тот же URL (или свой хост/порт/логин).
+
+```bash
+sudo apt-get update
+sudo apt-get install -y postgresql postgresql-contrib
+sudo systemctl enable --now postgresql
+# or
+sudo service postgresql start
+```
+
+#### Создание пользователя и базы
+
+```bash
+# Linux
+sudo -u postgres psql
+```
+
+В интерактивной консоли `psql`:
+
+```sql
+CREATE USER smart_guide WITH PASSWORD 'smart_guide';
+CREATE DATABASE smart_guide OWNER smart_guide;
+\q
+```
+
+Проверка:
+
+```bash
+psql "postgresql://smart_guide:smart_guide@localhost:5432/smart_guide" -c "SELECT 1"
+```
+
+#### Миграции схемы
+
+Из корня проекта, с активированным `.venv`:
+
+```bash
+source .venv/bin/activate
+export DATABASE_URL=postgresql+asyncpg://smart_guide:smart_guide@localhost:5432/smart_guide
+alembic upgrade head
+```
+
+После этого можно запускать API и worker (см. ниже). Если Postgres не запущен, при старте API будет `Connection refused` на порту `5432`.
+
 ### Запуск vLLM сервера (локально)
 Перед использованием VLM в сервисе необходимо запустить vLLM сервер:
 
@@ -68,11 +126,13 @@ smart_gallery_guide/
 ```
 
 ### Запуск сервиса локально
+Перед запуском: PostgreSQL запущен, в `.env` задан `DATABASE_URL`, выполнен `alembic upgrade head` (см. [PostgreSQL локально](#postgresql-локально-без-docker)).
+
 Для локального запуска новой архитектуры нужны три процесса:
 
 ```bash
 # 1) API
-uvicorn api.main:app --host 0.0.0.0 --port 8080
+uvicorn api.main:app --host 0.0.0.0 --port 8081
 
 # 2) worker
 python3 -m workers.vlm_worker
@@ -107,7 +167,7 @@ docker compose -f deploy/docker-compose.yml up -d --scale vlm-worker=2
 Проверка готовности:
 
 ```bash
-curl http://localhost:8080/readyz
+curl http://localhost:8081/readyz
 curl http://localhost/healthz
 ```
 
@@ -209,6 +269,10 @@ python3 scripts/reindex_chroma.py
 **Веб-поиск (обогащение ответов VLM)**
 * `WEB_SEARCH_ENABLED` — включение веб-поиска (`true`/`false`).
 * `WEB_SEARCH_MAX_RESULTS` — максимум сниппетов в контексте.
+
+**PostgreSQL**
+* `DATABASE_URL` — строка подключения SQLAlchemy/asyncpg (по умолчанию `localhost:5432`, БД `smart_guide`).
+* `DATABASE_ECHO`, `DATABASE_POOL_SIZE`, `DATABASE_MAX_OVERFLOW` — пул соединений.
 
 **Perplexity (используется только скриптами расширения метаданных)**
 * `PERPLEXITY_API_KEY`, `PERPLEXITY_BASE_URL`, `PERPLEXITY_MODEL`.

@@ -64,7 +64,9 @@ class _FakeExhibitService:
             extra={"techniq": "масло"},
         )
 
-    async def list(self, limit: int = 100, offset: int = 0) -> list[ExhibitDTO]:
+    async def list_exhibits(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[ExhibitDTO]:
         """List exhibits ordered by created_at desc."""
         return [await self.get("ex-1"), await self.get("ex-2")]
 

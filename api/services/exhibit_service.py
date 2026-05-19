@@ -54,7 +54,9 @@ class ExhibitService:
         row = await repo.get(exhibit_id)
         return _exhibit_to_dto(row) if row is not None else None
 
-    async def list(self, limit: int = 100, offset: int = 0) -> list[ExhibitDTO]:
+    async def list_exhibits(
+        self, limit: int = 100, offset: int = 0
+    ) -> list[ExhibitDTO]:
         """List exhibits ordered by ``created_at`` desc."""
         repo = ExhibitRepository(self._session)
         rows = await repo.list_all(limit=limit, offset=offset)

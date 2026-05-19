@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.search.web import WebSearchService
@@ -25,6 +27,8 @@ from db.repositories import ExhibitRepository, InferenceTaskRepository
 from db.session import get_engine, session_scope
 
 logger = logging.getLogger(__name__)
+
+_VLM_CHECK_TIMEOUT_S = 10.0
 
 
 def _worker_id() -> str:
@@ -173,6 +177,68 @@ async def _mark_error(task_id: uuid.UUID, message: str) -> None:
         logger.exception("[vlm-worker] failed to mark task %s as error", task_id)
 
 
+def _database_label(url: str) -> str:
+    """Human-readable DB target without credentials."""
+    try:
+        parsed = make_url(url)
+    except Exception:
+        return "<invalid DATABASE_URL>"
+    host = parsed.host or "?"
+    port = f":{parsed.port}" if parsed.port else ""
+    database = parsed.database or "?"
+    user = parsed.username or "?"
+    return f"{parsed.drivername}://{user}:***@{host}{port}/{database}"
+
+
+async def _check_vlm(settings: Settings) -> None:
+    """Verify that the VLM HTTP endpoint responds."""
+    async with VLM(
+        api_base_url=settings.vllm_api_base_url,
+        model_name=settings.vllm_vlm_model,
+        api_key=settings.vllm_api_key or None,
+    ) as vlm:
+        await vlm.client.models.list()
+
+
+async def _startup_checks(settings: Settings) -> bool:
+    """Verify dependencies, return True when the VLM endpoint is reachable."""
+    logger.info(
+        "[vlm-worker] checking database (%s)...", _database_label(settings.database_url)
+    )
+    try:
+        async with session_scope() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("[vlm-worker] database check failed")
+        raise
+
+    logger.info("[vlm-worker] database ok")
+
+    logger.info(
+        "[vlm-worker] checking VLM at %s (model=%s, timeout=%.0fs)...",
+        settings.vllm_api_base_url,
+        settings.vllm_vlm_model,
+        _VLM_CHECK_TIMEOUT_S,
+    )
+    try:
+        await asyncio.wait_for(_check_vlm(settings), timeout=_VLM_CHECK_TIMEOUT_S)
+    except TimeoutError:
+        logger.warning(
+            "[vlm-worker] VLM check timed out after %.0fs — tasks may fail until it is up",
+            _VLM_CHECK_TIMEOUT_S,
+        )
+        return False
+    except Exception as exc:
+        logger.warning(
+            "[vlm-worker] VLM unavailable (%s) — tasks may fail until it is up",
+            exc,
+        )
+        return False
+
+    logger.info("[vlm-worker] VLM ok")
+    return True
+
+
 async def _claim_one(worker_id: str) -> uuid.UUID | None:
     """Claim the oldest pending task."""
     async with session_scope() as session:
@@ -206,10 +272,28 @@ async def _main_loop(stop: asyncio.Event) -> None:
     settings = get_settings()
     worker_id = _worker_id()
     logger.info(
-        "[vlm-worker] starting (concurrency=%d, poll_interval=%.2fs)",
+        "[vlm-worker] starting (concurrency=%d, poll_interval=%.2fs, "
+        "stale_timeout=%ds, recovery_interval=%ds)",
         settings.worker_concurrency,
         settings.worker_poll_interval_s,
+        settings.worker_stale_timeout_s,
+        settings.worker_stale_check_interval_s,
     )
+
+    vlm_ok = await _startup_checks(settings)
+    if vlm_ok:
+        logger.info(
+            "[vlm-worker] ready — polling for tasks (worker_id=%s, web_search=%s)",
+            worker_id,
+            settings.web_search_enabled,
+        )
+    else:
+        logger.warning(
+            "[vlm-worker] ready (degraded) — polling for tasks, but VLM is "
+            "unreachable (worker_id=%s, web_search=%s)",
+            worker_id,
+            settings.web_search_enabled,
+        )
 
     web_search = WebSearchService() if settings.web_search_enabled else None
     semaphore = asyncio.Semaphore(max(1, settings.worker_concurrency))
@@ -240,6 +324,8 @@ async def _main_loop(stop: asyncio.Event) -> None:
                 except asyncio.TimeoutError:
                     pass
                 continue
+
+            logger.info("[vlm-worker] claimed task %s", task_id)
 
             async def _runner(tid: uuid.UUID = task_id) -> None:
                 try:

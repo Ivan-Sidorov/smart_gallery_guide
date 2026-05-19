@@ -31,7 +31,7 @@ async def list_exhibits(
     service: ExhibitService = Depends(get_exhibit_service),
 ) -> list[ExhibitDTO]:
     """List exhibits ordered by created_at desc."""
-    return await service.list(limit=limit, offset=offset)
+    return await service.list_exhibits(limit=limit, offset=offset)
 
 
 @router.get("/{exhibit_id}", response_model=ExhibitDTO)

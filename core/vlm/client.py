@@ -13,6 +13,13 @@ from core.vlm.prompts import base_system_prompt, search_evaluation_system_prompt
 from core.vlm.response import strip_vlm_reasoning
 
 
+class VLMError(RuntimeError):
+    """VLM API call failed."""
+
+
+VLM_NO_ANSWER_TEXT = "Не удалось получить ответ от модели."
+
+
 @dataclass
 class SearchEvaluation:
     """Result of VLM deciding whether external search is needed."""
@@ -107,11 +114,11 @@ class VLM:
             if response.choices and len(response.choices) > 0:
                 answer = response.choices[0].message.content
                 if not answer:
-                    return "Не удалось получить ответ от модели."
+                    return VLM_NO_ANSWER_TEXT
                 return strip_vlm_reasoning(answer)
-            return "Не удалось получить ответ от модели."
+            return VLM_NO_ANSWER_TEXT
         except Exception as e:
-            return f"Ошибка при обращении к VLM API: {str(e)}"
+            raise VLMError(str(e)) from e
 
     async def evaluate_search_need(
         self,
@@ -171,10 +178,7 @@ class VLM:
                 raw = strip_vlm_reasoning(response.choices[0].message.content or "")
             return self._parse_search_evaluation(raw)
         except Exception as e:
-            return SearchEvaluation(
-                needs_search=False,
-                answer=f"Ошибка при обращении к VLM API: {str(e)}",
-            )
+            raise VLMError(str(e)) from e
 
     @staticmethod
     def _parse_search_evaluation(raw: str) -> SearchEvaluation:
