@@ -7,7 +7,6 @@ Heavy ML imports are loaded lazily so that Telegram adapter and scripts that onl
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # noqa: SIM108
-    from core.agent import GuideAgent
     from core.encoders.text import TextEncoder
     from core.encoders.vision import VisionEncoder
     from core.schemas import (
@@ -29,7 +28,6 @@ if TYPE_CHECKING:  # noqa: SIM108
 
 
 __all__ = [
-    "GuideAgent",
     "TextEncoder",
     "VisionEncoder",
     "VectorDatabase",
@@ -52,7 +50,6 @@ __all__ = [
 
 # Maps public attribute name -> (submodule, attribute name in submodule).
 _LAZY: dict[str, tuple[str, str]] = {
-    "GuideAgent": ("core.agent", "GuideAgent"),
     "TextEncoder": ("core.encoders.text", "TextEncoder"),
     "VisionEncoder": ("core.encoders.vision", "VisionEncoder"),
     "VectorDatabase": ("core.vector_db", "VectorDatabase"),

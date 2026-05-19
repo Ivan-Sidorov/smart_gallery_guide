@@ -11,7 +11,6 @@ MODULES = [
     "core.search.web",
     "core.vlm.client",
     "core.vector_db",
-    "core.agent",
     "core.sync",
     "api",
     "api.main",

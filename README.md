@@ -48,7 +48,7 @@ smart_gallery_guide/
 ├── api/              # FastAPI backend (REST + orchestration)
 ├── adapters/         # Мессенджер-адаптеры (сейчас Telegram)
 ├── workers/          # Фоновые воркеры (VLM queue worker)
-├── core/             # ML-ядро: agent, encoders, vector DB, search
+├── core/             # ML-ядро: encoders, vector DB, VLM-клиент, search
 ├── db/               # SQLAlchemy модели, репозитории, миграции
 ├── scripts/          # Утилиты индексации и бенчмаркинга
 ├── tests/            # pytest smoke-тесты
