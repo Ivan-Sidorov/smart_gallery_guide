@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     vllm_vlm_temperature: float = Field(
         default=0.7, validation_alias="VLLM_VLM_TEMPERATURE"
     )
+    # When True, pass enable_thinking=False to vLLM (Qwen3 reasoning models).
+    vllm_vlm_disable_thinking: bool = Field(
+        default=True, validation_alias="VLLM_VLM_DISABLE_THINKING"
+    )
     vllm_api_key: str = Field(default="", validation_alias="VLLM_API_KEY")
 
     # --------------------------------------------------------------- Encoder models

@@ -47,6 +47,32 @@ class VLM:
             base_url=self.api_base_url,
             api_key=resolved_key if resolved_key else "mock_key",
         )
+        self._disable_thinking = settings.vllm_vlm_disable_thinking
+
+    @staticmethod
+    def completion_extra_body(*, disable_thinking: bool) -> dict | None:
+        """Build vLLM extra_body to turn off model-side reasoning when supported."""
+        if not disable_thinking:
+            return None
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+
+    def _chat_completion_kwargs(
+        self,
+        *,
+        messages: list,
+        max_tokens: int,
+        temperature: float,
+    ) -> dict:
+        kwargs: dict = {
+            "model": self.model_name,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        extra_body = self.completion_extra_body(disable_thinking=self._disable_thinking)
+        if extra_body is not None:
+            kwargs["extra_body"] = extra_body
+        return kwargs
 
     @staticmethod
     def _image_to_base64(image: Image.Image) -> str:
@@ -94,21 +120,24 @@ class VLM:
         else:
             prompt = f"Question: {question}\n\nAnswer:"
 
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
+        ]
+
         try:
             response = await self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": image_url}},
-                        ],
-                    },
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature,
+                **self._chat_completion_kwargs(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
             )
 
             if response.choices and len(response.choices) > 0:
@@ -156,21 +185,24 @@ class VLM:
             else f"Вопрос: {question}"
         )
 
+        messages = [
+            {"role": "system", "content": search_evaluation_system_prompt()},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
+        ]
+
         try:
             response = await self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": search_evaluation_system_prompt()},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": image_url}},
-                        ],
-                    },
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature,
+                **self._chat_completion_kwargs(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
             )
 
             raw = ""
@@ -181,22 +213,54 @@ class VLM:
             raise VLMError(str(e)) from e
 
     @staticmethod
+    def _search_query_from_payload(payload: str) -> str:
+        """Take only the search query, stopping at a trailing ANSWER: block."""
+        query = re.split(r"(?i)\s*ANSWER:\s*", payload, maxsplit=1)[0].strip()
+        return query.splitlines()[0].strip()
+
+    @staticmethod
     def _parse_search_evaluation(raw: str) -> SearchEvaluation:
         """Parse VLM output into SearchEvaluation (ANSWER: / SEARCH: format)."""
-        search_match = re.match(r"(?i)^SEARCH:\s*(.+)", raw, re.DOTALL)
-        if search_match:
-            return SearchEvaluation(
-                needs_search=True, search_query=search_match.group(1).strip()
-            )
+        text = (raw or "").strip()
+        if not text:
+            return SearchEvaluation(needs_search=False, answer="")
 
-        answer_match = re.match(r"(?i)^ANSWER:\s*(.+)", raw, re.DOTALL)
+        search_query: str | None = None
+        answer_text: str | None = None
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            search_match = re.match(r"(?i)^SEARCH:\s*(.*)$", stripped)
+            if search_match:
+                query = VLM._search_query_from_payload(search_match.group(1))
+                if query:
+                    search_query = query
+                continue
+
+            answer_match = re.match(r"(?i)^ANSWER:\s*(.*)$", stripped, re.DOTALL)
+            if answer_match:
+                answer_text = strip_vlm_reasoning(answer_match.group(1))
+
+        if search_query:
+            return SearchEvaluation(needs_search=True, search_query=search_query)
+        if answer_text:
+            return SearchEvaluation(needs_search=False, answer=answer_text)
+
+        # Fallback: whole blob starts with SEARCH:/ANSWER: (legacy one-line output).
+        search_match = re.match(r"(?i)^SEARCH:\s*(.+)", text, re.DOTALL)
+        if search_match:
+            query = VLM._search_query_from_payload(search_match.group(1))
+            if query:
+                return SearchEvaluation(needs_search=True, search_query=query)
+
+        answer_match = re.match(r"(?i)^ANSWER:\s*(.+)", text, re.DOTALL)
         if answer_match:
             return SearchEvaluation(
                 needs_search=False,
                 answer=strip_vlm_reasoning(answer_match.group(1)),
             )
 
-        return SearchEvaluation(needs_search=False, answer=strip_vlm_reasoning(raw))
+        return SearchEvaluation(needs_search=False, answer=strip_vlm_reasoning(text))
 
     async def close(self) -> None:
         await self.client.close()
