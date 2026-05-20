@@ -60,10 +60,6 @@ class InferenceTaskRepository:
         self,
         task_id: uuid.UUID,
         result: dict[str, Any],
-        *,
-        tokens_in: int | None = None,
-        tokens_out: int | None = None,
-        cost_usd: float | None = None,
     ) -> InferenceTask | None:
         """Mark a task as done."""
         task = await self.get(task_id)
@@ -72,9 +68,6 @@ class InferenceTaskRepository:
         task.status = TaskStatus.DONE
         task.result = result
         task.finished_at = datetime.now(timezone.utc)
-        task.tokens_in = tokens_in
-        task.tokens_out = tokens_out
-        task.cost_usd = cost_usd
         await self.session.flush()
         return task
 

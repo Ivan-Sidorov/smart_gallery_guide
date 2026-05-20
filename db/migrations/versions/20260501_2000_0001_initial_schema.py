@@ -52,7 +52,9 @@ def upgrade() -> None:
         ),
         sa.Column("source", sa.String(length=128)),
         sa.Column("checksum", sa.String(length=128)),
-        sa.Column("embedding_version", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column(
+            "embedding_version", sa.Integer(), nullable=False, server_default="0"
+        ),
         sa.Column("indexed_at", sa.DateTime(timezone=True)),
         sa.Column(
             "needs_reindex",
@@ -115,7 +117,9 @@ def upgrade() -> None:
         sa.Column("question", sa.Text(), nullable=False),
         sa.Column("answer", sa.Text(), nullable=False),
         sa.Column("source", sa.String(length=128)),
-        sa.Column("embedding_version", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column(
+            "embedding_version", sa.Integer(), nullable=False, server_default="0"
+        ),
         sa.Column("indexed_at", sa.DateTime(timezone=True)),
         sa.Column(
             "created_at",
@@ -135,9 +139,7 @@ def upgrade() -> None:
 
     op.create_table(
         "messages",
-        sa.Column(
-            "id", sa.BigInteger(), autoincrement=True, nullable=False
-        ),
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("user_id", sa.BigInteger(), nullable=False),
         sa.Column(
@@ -182,16 +184,14 @@ def upgrade() -> None:
     op.create_index(
         "ix_messages_session_created", "messages", ["session_id", "created_at"]
     )
-    op.create_index(
-        "ix_messages_user_created", "messages", ["user_id", "created_at"]
-    )
+    op.create_index("ix_messages_user_created", "messages", ["user_id", "created_at"])
 
     op.create_table(
         "inference_tasks",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column(
             "type",
-            sa.Enum("vlm_qa", "recognize", "vision_embed", name="task_type"),
+            sa.Enum("vlm_qa", name="task_type"),
             nullable=False,
         ),
         sa.Column(
@@ -220,9 +220,6 @@ def upgrade() -> None:
         sa.Column("finished_at", sa.DateTime(timezone=True)),
         sa.Column("worker", sa.String(length=128)),
         sa.Column("model", sa.String(length=256)),
-        sa.Column("tokens_in", sa.Integer()),
-        sa.Column("tokens_out", sa.Integer()),
-        sa.Column("cost_usd", sa.Numeric(10, 6)),
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["users.id"],

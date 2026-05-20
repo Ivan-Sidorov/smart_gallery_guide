@@ -11,8 +11,6 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
-    Integer,
-    Numeric,
     String,
     Text,
     func,
@@ -28,8 +26,6 @@ class TaskType(str, enum.Enum):
     """Inference task type."""
 
     VLM_QA = "vlm_qa"
-    RECOGNIZE = "recognize"
-    VISION_EMBED = "vision_embed"
 
 
 class TaskStatus(str, enum.Enum):
@@ -81,9 +77,6 @@ class InferenceTask(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     worker: Mapped[str | None] = mapped_column(String(128))
     model: Mapped[str | None] = mapped_column(String(256))
-    tokens_in: Mapped[int | None] = mapped_column(Integer)
-    tokens_out: Mapped[int | None] = mapped_column(Integer)
-    cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 6))
 
     __table_args__ = (
         Index(
